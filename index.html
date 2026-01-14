@@ -483,8 +483,35 @@ window.exportMasterDB = exportMasterDB;
 </div>
 
 <div id="sec-office" class="section">
-            <div class="card"><h2>📦 Create New Batch</h2><div class="grid-2"><input type="text" id="off-batch-name" placeholder="Name"><select id="off-carrier-select"></select></div><input type="date" id="off-batch-date"><div class="grid-2"><textarea id="off-products-list" rows="12" placeholder="SKU [TAB] Qty [TAB] Pos"></textarea><textarea id="off-order-meta" rows="12" placeholder="ID [TAB] Customer [TAB] Content"></textarea></div><button class="btn-submit" onclick="createBatch()">CREATE BATCH</button></div>
-        </div>
+  <div class="card">
+    <h2>📦 Create New Batch</h2>
+
+    <div class="grid-2">
+      <input type="text" id="off-batch-name" placeholder="Name">
+      <select id="off-carrier-select"></select>
+    </div>
+
+    <input type="date" id="off-batch-date">
+
+    <div class="grid-2">
+      <textarea id="off-products-list" rows="12" placeholder="SKU [TAB] Qty [TAB] Pos"></textarea>
+      <textarea id="off-order-meta" rows="12" placeholder="ID [TAB] Customer [TAB] Content"></textarea>
+    </div>
+
+    <button class="btn-submit" onclick="createBatch()">CREATE BATCH</button>
+
+    <hr style="margin:30px 0;">
+
+    <h3>🚚 Gerir Transportadoras</h3>
+
+    <div class="grid-2">
+      <input type="text" id="new-carrier-input" placeholder="Nova transportadora (ex: DHL)">
+      <button class="btn-submit" onclick="addCarrier()">ADICIONAR</button>
+    </div>
+
+    <div id="carrier-admin-list" style="margin-top:15px;"></div>
+  </div>
+</div>
     </div>
 </div>
 
@@ -1281,9 +1308,12 @@ function handleScan(v, mode) {
                     ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span><div style="font-size:12px; color:#991b1b; margin-top:4px;">${(cancelInfo && cancelInfo.reason) ? ('Motivo: ' + cancelInfo.reason) : ''}</div>`
                     : (isPack ? '<span style="color:#166534; font-weight:900;">PACKED</span>' : '<span style="color:#92400e; font-weight:900;">PENDING</span>');
 
+                const canCancel = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
                 const actionCell = isCancelled
                     ? `<button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button>`
-                    : (isPack ? '-' : `<button onclick="cancelBatchId('${batchId}', '${id}')">CANCEL</button>`);
+                    : (canCancel
+                        ? `<button class="btn-small btn-delete" style="background: var(--error); padding:10px 14px; font-size:11px;" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
+                        : '-');
 
                 html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
             });
@@ -1382,7 +1412,99 @@ Missing: ${sample}${more}`);
         }
     }
 
-    function syncGlobalData() {
+    // ================================
+// 🚚 CARRIER MANAGEMENT (OFFICE)
+// ================================
+function renderCarrierAdminList(carriers) {
+    const box = document.getElementById('carrier-admin-list');
+    if (!box) return;
+    box.innerHTML = "";
+
+    if (!carriers || !carriers.length) {
+        box.innerHTML = "<div style='color:#666; font-style:italic;'>Nenhuma transportadora configurada.</div>";
+        return;
+    }
+
+    carriers.forEach(c => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.padding = '12px';
+        row.style.border = '1px solid #ddd';
+        row.style.borderRadius = '10px';
+        row.style.marginBottom = '8px';
+        row.style.background = '#f9fafb';
+
+        row.innerHTML = `<b>${c}</b>
+            <button class="btn-small btn-delete" onclick="removeCarrier('${c}')">APAGAR</button>`;
+        box.appendChild(row);
+    });
+}
+
+async function addCarrier() {
+    try {
+        // Optional guard: only admins can edit carriers
+        if (!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))) {
+            return alert("Sem permissões para editar transportadoras.");
+        }
+
+        const inp = document.getElementById('new-carrier-input');
+        if (!inp) return;
+
+        const name = (inp.value || "").trim().toUpperCase();
+        if (!name) return alert("Nome inválido.");
+
+        const ref = db.ref('config/carriers');
+        const snap = await ref.once('value');
+        let carriers = snap.val() || [];
+
+        if (!Array.isArray(carriers)) carriers = Object.values(carriers);
+
+        if (carriers.includes(name)) {
+            return alert("Essa transportadora já existe.");
+        }
+
+        carriers.push(name);
+        carriers = carriers.filter(Boolean).map(x => String(x).trim().toUpperCase());
+        carriers = Array.from(new Set(carriers)).sort();
+
+        await ref.set(carriers);
+        inp.value = "";
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao adicionar transportadora.");
+    }
+}
+
+async function removeCarrier(name) {
+    try {
+        // Optional guard: only admins can edit carriers
+        if (!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))) {
+            return alert("Sem permissões para editar transportadoras.");
+        }
+
+        if (!name) return;
+        if (!confirm(`Apagar a transportadora "${name}"?`)) return;
+
+        const ref = db.ref('config/carriers');
+        const snap = await ref.once('value');
+        let carriers = snap.val() || [];
+
+        if (!Array.isArray(carriers)) carriers = Object.values(carriers);
+
+        carriers = carriers.filter(c => String(c).trim().toUpperCase() !== String(name).trim().toUpperCase());
+        carriers = carriers.filter(Boolean).map(x => String(x).trim().toUpperCase());
+        carriers = Array.from(new Set(carriers)).sort();
+
+        await ref.set(carriers);
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao apagar transportadora.");
+    }
+}
+
+function syncGlobalData() {
         const fD = document.getElementById('global-date-filter').value;
         db.ref('active_batches').on('value', snap => {
             const bts = snap.val() || {}; 
@@ -1393,9 +1515,14 @@ Missing: ${sample}${more}`);
         db.ref('config/master_products').on('value', s => { masterProductsDB = s.val() || {}; try{ if(typeof updateMasterPreview==='function') updateMasterPreview(); }catch(e){} });
 db.ref('config/carriers').on('value', s => { 
             const carriers = s.val() || ["CTT", "NACEX", "CORREOS"]; 
-            const sel = document.getElementById('off-carrier-select'); if(sel) { sel.innerHTML = ""; carriers.forEach(c => sel.innerHTML += `<option value="${c}">${c}</option>`); }
-        });
-    }
+            const sel = document.getElementById('off-carrier-select'); 
+            if(sel) { 
+                sel.innerHTML = ""; 
+                carriers.forEach(c => sel.innerHTML += `<option value="${c}">${c}</option>`); 
+            }
+            // also render admin list in OFFICE (if present)
+            try { renderCarrierAdminList(Array.isArray(carriers) ? carriers : Object.values(carriers)); } catch(e) {}
+        });}
 
     function showMetadata(id) {
         if(!activeBatchData) return;
@@ -1853,8 +1980,13 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 })();
 
 // --- FIX: CANCEL BUTTON IN EDIT BATCH MODAL ---
-    async function cancelBatchId(batchId, orderId) {
+    async function cancelBatchId(batchId, orderId, wasPacked) {
         try {
+            // Permitir cancelar mesmo depois de embalado (PACKED)
+            if (wasPacked) {
+                const ok = confirm(`ATENÇÃO: O ID ${orderId} já está PACKED.\n\nSe cancelares, vai ficar marcado como CANCELADO no lote (com motivo), e deixa de contar para finalizar o lote.\nO histórico de packing continua nos registos.\n\nQueres continuar?`);
+                if (!ok) return;
+            }
             const reason = prompt(`Motivo do cancelamento para o ID ${orderId}?`);
             if (!reason || !reason.trim()) return;
 
