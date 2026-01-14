@@ -763,6 +763,11 @@ function handleScan(v, mode) {
     async function confirmOrder(mode) {
         const m = mode || currentMode;
         const bId = document.getElementById('wh-batch-select').value;
+
+        // Guard: allow viewing old/COMPLETED batches, but block writing packing records
+        if(m === 'PACKING' && activeBatchData && activeBatchData.status && activeBatchData.status !== 'READY_TO_PACK') {
+            return alert("Este lote está fechado (COMPLETED) ou ainda não está pronto para packing.");
+        }
         if(!scanData.id || !scanData.track) return alert("Faltam dados!");
 
         const endTime = new Date().toLocaleTimeString('pt-PT');
@@ -1269,6 +1274,36 @@ function handleScan(v, mode) {
 
     function logBatchAction(bId, msg) { db.ref(`active_batches/${bId}/history`).push({ time: new Date().toLocaleString('pt-PT'), user: currentUser.email.split('@')[0].toUpperCase(), msg }); }
 
+    // --- NEW: INVENTORY QTY CHANGE LOGGING (shows in Modification Log) ---
+    async function updateInventoryQty(batchId, skuKey, oldQty, newQtyVal) {
+        try {
+            const newQty = parseInt(newQtyVal, 10);
+            const prevQty = parseInt(oldQty, 10);
+
+            if (isNaN(newQty)) return alert("Quantidade inválida.");
+            if (newQty < 0) return alert("Quantidade não pode ser negativa.");
+            if (newQty === prevQty) return;
+
+            await db.ref(`active_batches/${batchId}/inventory/${skuKey}/q`).set(newQty);
+            logBatchAction(batchId, `INV QTY UPDATE: ${skuKey} | ${prevQty} -> ${newQty}`);
+        } catch (e) {
+            console.error(e);
+            alert("Erro ao atualizar quantidade.");
+        }
+    }
+
+    async function removeInventoryItem(batchId, skuKey, oldQty) {
+        try {
+            if (!confirm(`Remover o produto ${skuKey} do inventário?`)) return;
+            await db.ref(`active_batches/${batchId}/inventory/${skuKey}`).remove();
+            logBatchAction(batchId, `INV ITEM REMOVED: ${skuKey} | was ${oldQty}`);
+        } catch (e) {
+            console.error(e);
+            alert("Erro ao remover produto.");
+        }
+    }
+
+
     function openEditModal(batchId, readOnly = false) {
         if(!batchId) return;
         db.ref('active_batches/'+batchId).on('value', snap => {
@@ -1278,7 +1313,7 @@ function handleScan(v, mode) {
             const tbody = document.querySelector('#edit-inventory-table tbody'); tbody.innerHTML = "";
             Object.keys(b.inventory || {}).sort().forEach(k => {
                 const it = b.inventory[k];
-                tbody.innerHTML += `<tr><td>${k}</td><td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="db.ref('active_batches/${batchId}/inventory/${k}/q').set(parseInt(this.value))">`}</td><td>${it.pos}</td>${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="db.ref('active_batches/${batchId}/inventory/${k}').remove()">X</button></td>`}</tr>`;
+                tbody.innerHTML += `<tr><td>${k}</td><td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInventoryQty('${batchId}', '${k}', ${it.q}, this.value)">`}</td><td>${it.pos}</td>${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="removeInventoryItem('${batchId}', '${k}', ${it.q})">X</button></td>`}</tr>`;
             });
             const idsList = document.getElementById('edit-ids-list');
             let html = '<table><thead><tr><th>ID</th><th>Cliente</th><th>Content</th><th>Status</th><th>Ação</th></tr></thead><tbody>';
@@ -1327,12 +1362,31 @@ function handleScan(v, mode) {
     }
 
     function loadBatchData(bId) {
-        if(!bId) return; localStorage.setItem('lastPackingBatch', bId);
+        if(!bId) return; 
+        localStorage.setItem('lastPackingBatch', bId);
+
         if(activeBatchPath) db.ref(activeBatchPath).off();
         activeBatchPath = 'active_batches/' + bId;
+
         db.ref(activeBatchPath).on('value', s => {
-            activeBatchData = s.val(); if(!activeBatchData) return;
-            document.getElementById('btn-finalize-batch').style.display = 'block';
+            activeBatchData = s.val(); 
+            if(!activeBatchData) return;
+
+            // Allow access to COMPLETED batches, but lock packing actions unless READY_TO_PACK
+            const st = activeBatchData.status || "";
+            const canPack = (st === 'READY_TO_PACK');
+
+            const finBtn = document.getElementById('btn-finalize-batch');
+            if(finBtn) finBtn.style.display = canPack ? 'block' : 'none';
+
+            const inp = document.getElementById('main-input');
+            if(inp) inp.disabled = !canPack;
+
+            // If locked, clear any partial scan UI
+            if(!canPack) {
+                document.getElementById('btn-confirm-order').style.display = 'none';
+            }
+
             updateProcessedTable(bId);
         });
     }
@@ -1381,14 +1435,36 @@ Missing: ${sample}${more}`);
 
 
     function loadPickingList() {
-        const bId = document.getElementById('pick-batch-select').value; if(!bId) return;
+        const bId = document.getElementById('pick-batch-select').value; 
+        if(!bId) return;
+
         db.ref('active_batches/'+bId).once('value', snap => {
-            const container = document.getElementById('picking-list-container'); container.innerHTML = "";
-            Object.keys(snap.val().inventory || {}).forEach(k => {
-                const it = snap.val().inventory[k];
-                container.innerHTML += `<div style="display:flex; align-items:center; padding:10px; border-bottom:1px solid #eee;"><input type="checkbox" class="pk-check" style="width:30px; height:30px; margin-right:15px;"><span><b>${it.q}x</b> - ${k}</span><span class="location-tag">📍 ${it.pos}</span></div>`;
+            const b = snap.val() || {};
+            const container = document.getElementById('picking-list-container'); 
+            container.innerHTML = "";
+
+            const canPick = (b.status === 'PENDING_PICK');
+
+            Object.keys(b.inventory || {}).forEach(k => {
+                const it = b.inventory[k];
+                container.innerHTML += `
+                    <div style="display:flex; align-items:center; padding:10px; border-bottom:1px solid #eee;">
+                        <input type="checkbox" class="pk-check" style="width:30px; height:30px; margin-right:15px;" ${canPick ? '' : 'disabled'}>
+                        <span><b>${it.q}x</b> - ${k}</span>
+                        <span class="location-tag">📍 ${it.pos}</span>
+                    </div>`;
             });
-            document.getElementById('btn-select-all').style.display = 'block'; document.getElementById('btn-pick-details').style.display = 'block'; document.getElementById('btn-finish-picking').style.display = 'block';
+
+            // Always allow viewing details, even for READY/COMPLETED
+            const btnDetails = document.getElementById('btn-pick-details');
+            const btnAll = document.getElementById('btn-select-all');
+            const btnFinish = document.getElementById('btn-finish-picking');
+
+            if(btnDetails) btnDetails.style.display = 'block';
+
+            // Only allow picking actions when batch is in PENDING_PICK
+            if(btnAll) btnAll.style.display = canPick ? 'block' : 'none';
+            if(btnFinish) btnFinish.style.display = canPick ? 'block' : 'none';
         });
     }
 
@@ -1543,16 +1619,45 @@ db.ref('config/carriers').on('value', s => {
         document.getElementById('card-printed').innerText = nP; document.getElementById('card-ready').innerText = nR; document.getElementById('card-packed').innerText = nK; 
     }
     function updateSelects(bts, fD) {
-        const selWH = document.getElementById('wh-batch-select'), selPK = document.getElementById('pick-batch-select');
-        let pkOpt = '<option value="">-- SELECT PICKING BATCH --</option>', whOpt = '<option value="">-- SELECT PACKING BATCH --</option>';
-        for(let k in bts) { 
-            const b = bts[k]; if(b.dateClean === fD) { 
-                const label = b.name + ' | ' + b.carrier; 
-                if(b.status === 'PENDING_PICK') pkOpt += `<option value="${k}">${label}</option>`; 
-                if(b.status === 'READY_TO_PACK') whOpt += `<option value="${k}">${label}</option>`; 
-            } 
+        const selWH = document.getElementById('wh-batch-select'),
+              selPK = document.getElementById('pick-batch-select');
+
+        let pkOpt = '<option value="">-- SELECT BATCH (ANY STATUS) --</option>';
+        let whOpt = '<option value="">-- SELECT BATCH (READY / COMPLETED) --</option>';
+
+        // Build sortable list (newest first)
+        const entries = Object.entries(bts || {}).filter(([k,b]) => b && (b.name || b.dateClean || b.carrier || b.status));
+        entries.sort((a,b) => {
+            const da = (a[1].dateClean || "");
+            const dbb = (b[1].dateClean || "");
+            if (dbb !== da) return dbb.localeCompare(da);
+            const na = (a[1].name || a[0]);
+            const nb = (b[1].name || b[0]);
+            return nb.localeCompare(na);
+        });
+
+        entries.forEach(([k,b]) => {
+            const date = b.dateClean || "";
+            const name = b.name || k;
+            const carrier = b.carrier || "N/A";
+            const status = b.status || "UNKNOWN";
+            const label = `${date} | ${name} | ${carrier} | ${status}`;
+
+            // Picking dropdown: allow opening old batches for viewing
+            pkOpt += `<option value="${k}">${label}</option>`;
+
+            // Packing dropdown: show everything EXCEPT picking-only batches, but keep access to COMPLETED
+            if (status !== 'PENDING_PICK') {
+                whOpt += `<option value="${k}">${label}</option>`;
+            }
+        });
+
+        if (selPK) selPK.innerHTML = pkOpt;
+        if (selWH) {
+            selWH.innerHTML = whOpt;
+            const cur = localStorage.getItem('lastPackingBatch');
+            if (cur && selWH.querySelector(`option[value="${cur}"]`)) selWH.value = cur;
         }
-        if(selPK) selPK.innerHTML = pkOpt; if(selWH) { selWH.innerHTML = whOpt; const cur = localStorage.getItem('lastPackingBatch'); if(cur && selWH.querySelector(`option[value="${cur}"]`)) selWH.value = cur; }
     }
     function updateMasterPreview() { const tbody = document.querySelector('#master-db-table tbody'), search = document.getElementById('master-search').value.toUpperCase(); tbody.innerHTML = ""; Object.keys(masterProductsDB).forEach(k => { if (k.includes(search) || masterProductsDB[k].toUpperCase().includes(search)) { tbody.innerHTML += `<tr><td>${k}</td><td>${masterProductsDB[k]}</td></tr>`; } }); }
     function handleCSVUpload() { const fileInput = document.getElementById('csv-file-input'); if (!fileInput.files.length) return; const reader = new FileReader(); reader.onload = function(e) { const lines = e.target.result.split(/\r?\n/); const newMaster = {}; lines.forEach((line, index) => { if (index === 0 || !line.trim()) return; const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); if (parts.length >= 2) { let name = parts[0].replace(/^"|"$/g, '').trim(), bar = parts[1].replace(/^"|"$/g, '').trim(); if(bar) newMaster[safeKey(bar)] = name; } }); db.ref('config/master_products').set(newMaster).then(() => alert("Master Updated!")); }; reader.readAsText(fileInput.files[0]); }
