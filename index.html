@@ -789,6 +789,28 @@ function handleScan(v, mode) {
                 time: endTime, // Main sorting time
                 dateClean: new Date().toISOString().split('T')[0] 
             });
+
+            // NEW: write to persistent ID history so SEARCH can show all events even across batch recreations
+            const dc = new Date().toISOString().split('T')[0];
+            const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
+            const bKey = bId || "GENERAL";
+            const bName = (m === 'PACKING' && activeBatchData && activeBatchData.name) ? activeBatchData.name : bKey;
+            const carr = (m === 'PACKING' && activeBatchData && activeBatchData.carrier) ? activeBatchData.carrier : "N/A";
+            await pushIdHistory(scanData.id, {
+                Type: (m === 'PACKING') ? "PACKING" : "RETURNS",
+                BatchKey: bKey,
+                Batch: bName,
+                Carrier: carr,
+                User: uname,
+                dateClean: dc,
+                time: endTime,
+                Tracking: scanData.track,
+                Items_or_Content: scanData.prods.join(' | ') || "No Items",
+                Details: (m === 'PACKING')
+                    ? ("Start: " + (scanData.startTime || endTime) + " | Confirm: " + endTime)
+                    : "Return saved"
+            });
+
             resetScan(); 
         } catch (e) { alert("Erro ao gravar."); }
     }
@@ -1105,151 +1127,171 @@ function handleScan(v, mode) {
         var allBox = document.getElementById('search-all-records');
         var searchAll = allBox ? allBox.checked : false;
 
-        var regPromise, batchPromise;
+        // 1) Load persistent id_history for each ID (this is what guarantees you see ALL occurrences)
+        var histSnaps = await Promise.all(idsToSearch.map(function(sid){
+            return db.ref('id_history/' + sid).once('value');
+        }));
 
+        // 2) Also load packing/returns records from registos for completeness/backwards-compat
+        var regSnap;
         if (searchAll) {
-            // FULL SCAN (slow)
-            if (!confirm("SEARCH ALL RECORDS pode demorar. Continuar?")) {
-                if (container) container.innerHTML = "<div class='card' style='grid-column: 1 / -1;'><b>Search cancelled.</b></div>";
-                return;
-            }
-            regPromise = db.ref('registos').once('value');
-            batchPromise = db.ref('active_batches').once('value');
+            regSnap = await db.ref('registos').once('value');
         } else {
-            // PERFORMANCE: only pull data in the selected date range (needs index on dateClean)
             var regRef = db.ref('registos');
             if (start && end) regRef = regRef.orderByChild('dateClean').startAt(start).endAt(end);
             else regRef = regRef.orderByChild('dateClean');
+            regSnap = await regRef.once('value');
+        }
+        var regData = regSnap.val() || {};
 
+        // Batch metadata for carrier/name enrichment
+        var batchSnap;
+        if (searchAll) {
+            batchSnap = await db.ref('active_batches').once('value');
+        } else {
             var batchRef = db.ref('active_batches');
+            // keep it range-limited for performance; id_history already carries full batch created/cancel events
             if (start && end) batchRef = batchRef.orderByChild('dateClean').startAt(start).endAt(end);
             else batchRef = batchRef.orderByChild('dateClean');
-
-            regPromise = regRef.once('value');
-            batchPromise = batchRef.once('value');
+            batchSnap = await batchRef.once('value');
         }
-
-        var regSnap = await regPromise;
-        var batchSnap = await batchPromise;
-
-        var regData = regSnap.val() || {};
         var batchData = batchSnap.val() || {};
 
-        idsToSearch.forEach(function(sid){
+        function _eventKey(ev){
+            return [
+                _fmt(ev.Type), _fmt(ev.DateTime), _fmt(ev.Batch), _fmt(ev.Carrier),
+                _fmt(ev.User), _fmt(ev.Tracking), _fmt(ev.Items_or_Content), _fmt(ev.Details)
+            ].join("||");
+        }
+
+        idsToSearch.forEach(function(sid, ix){
             var events = [];
-            var summary = { status: "PENDING" };
+            var seen = new Set();
 
-            // BATCH CREATED + CANCELLED from active_batches (range-limited)
-            Object.entries(batchData).forEach(function(entry){
-                var k = entry[0], b = entry[1];
-                if(!b) return;
+            // --- A) From id_history (covers BATCH_CREATED + CANCELLED + (new) PACKING/RETURNS) ---
+            var hist = histSnaps[ix].val() || {};
+            Object.values(hist).forEach(function(e){
+                if(!e) return;
+                var ev = {
+                    ts: Number(e.ts || 0),
+                    dateClean: _fmt(e.dateClean),
+                    DateTime: _fmt(e.DateTime),
+                    Type: _fmt(e.Type),
+                    Batch: _fmt(e.Batch || e.batchName || e.BatchName || e.Batch_Key || e.BatchKey),
+                    Carrier: _fmt(e.Carrier),
+                    User: _fmt(e.User),
+                    Tracking: _fmt(e.Tracking),
+                    Items_or_Content: _fmt(e.Items_or_Content),
+                    Details: _fmt(e.Details),
+                    Customer: _fmt(e.Customer || ""),
+                    Expected_Content: _fmt(e.Items_or_Content || "")
+                };
+                if(!ev.DateTime) ev.DateTime = _dt(ev.dateClean, _fmt(e.time));
+                if(!ev.dateClean) ev.dateClean = ev.DateTime.slice(0,10);
 
-                var exp = b.expected_ids || [];
-                if(exp.indexOf(sid) === -1) return;
+                // Apply filters (type/date) here
+                if (!_passesDate(ev.DateTime, start, end)) return;
+                if (!_passesType(ev.Type, filters.type)) return;
 
-                var batchName = b.name || k;
-                var carrier = b.carrier || "N/A";
-                var od = (b.order_details && b.order_details[sid]) ? b.order_details[sid] : {};
-
-                if (!summary.batchKey) {
-                    summary.batchKey = k;
-                    summary.batchName = batchName;
-                    summary.carrier = carrier;
-                    summary.customer = _fmt(od.name);
-                    summary.expectedContent = _fmt(od.content);
-                }
-
-                var createdDT = _dtKey(b.dateClean, b.createdAt || "00:00");
-                if (_passesDate(createdDT, start, end) && _passesType("OFFICE / BATCH_CREATED", filters.type)) {
-                    events.push({
-                        DateTime: createdDT,
-                        Type: "OFFICE / BATCH_CREATED",
-                        Batch: batchName,
-                        Carrier: carrier,
-                        User: _fmt(b.createdBy || "SYSTEM"),
-                        Tracking: "",
-                        Items_or_Content: _fmt(od.content),
-                        Details: "Added to batch | Customer: " + _fmt(od.name)
-                    });
-                }
-
-                if(b.cancelled_ids && b.cancelled_ids[sid]) {
-                    var c = b.cancelled_ids[sid];
-                    var cancelDT = _fmt(c.time);
-                    if (_passesDate(cancelDT, start, end) && _passesType("CANCELLED", filters.type)) {
-                        events.push({
-                            DateTime: cancelDT,
-                            Type: "CANCELLED",
-                            Batch: batchName,
-                            Carrier: carrier,
-                            User: _fmt(c.user),
-                            Tracking: "",
-                            Items_or_Content: "",
-                            Details: "Reason: " + _fmt(c.reason)
-                        });
-                    }
-                    summary.status = "CANCELLED";
-                    summary.cancelReason = _fmt(c.reason);
-                    summary.cancelBy = _fmt(c.user);
-                    summary.cancelAt = _fmt(c.time);
-                }
+                var k = _eventKey(ev);
+                if(seen.has(k)) return;
+                seen.add(k);
+                events.push(ev);
             });
 
-            // PACKING/RETURNS from registos (range-limited)
+            // --- B) From registos (PACKING/RETURNS) ---
             Object.values(regData).forEach(function(r){
                 if(!r || r.id !== sid) return;
                 if(r.mode !== 'PACKING' && r.mode !== 'RETURN') return;
 
-                var batchKey = r.batch || "GENERAL";
-                // batchData in range may not include this batch if its dateClean outside range; fallback read minimal batch info not done (perf tradeoff)
-                var b = batchData[batchKey] || {};
-                var batchName = b.name || batchKey;
+                var bKey = r.batch || "GENERAL";
+                var b = batchData[bKey] || {};
+                var batchName = b.name || bKey;
                 var carrier = b.carrier || "N/A";
-                var od = (b.order_details && b.order_details[sid]) ? b.order_details[sid] : {};
 
-                if(r.mode === 'PACKING') {
-                    if (!_passesType("PACKING", filters.type)) return;
-                    var dt = _dtKey(r.dateClean, r.endTime || r.time);
-                    events.push({
-                        DateTime: dt,
-                        Type: "PACKING",
-                        Batch: batchName,
-                        Carrier: carrier,
-                        User: _fmt(r.user),
-                        Tracking: _fmt(r.track),
-                        Items_or_Content: (_splitProductsField(r.prods).join(' | ') || _fmt(r.prods)),
-                        Details: "Start: " + _fmt(r.startTime || r.time) + " | Confirm: " + _fmt(r.endTime || r.time)
-                            + " | Customer: " + _fmt(od.name) + " | Expected: " + _fmt(od.content)
-                    });
+                var type = (r.mode === 'PACKING') ? "PACKING" : "RETURNS";
+                if (!_passesType(type, filters.type)) return;
 
-                    if (summary.status !== "CANCELLED") {
-                        summary.status = "PACKED";
-                        summary.packedBy = _fmt(r.user);
-                        summary.packedAt = dt;
-                        summary.tracking = _fmt(r.track);
-                    }
-                } else {
-                    if (!_passesType("RETURNS", filters.type)) return;
-                    var dtR = _dtKey(r.dateClean, r.time);
-                    events.push({
-                        DateTime: dtR,
-                        Type: "RETURNS",
-                        Batch: batchName,
-                        Carrier: carrier,
-                        User: _fmt(r.user),
-                        Tracking: _fmt(r.track),
-                        Items_or_Content: (_splitProductsField(r.prods).join(' | ') || _fmt(r.prods)),
-                        Details: "Return saved"
-                    });
-                }
+                var dt = _dtKey(r.dateClean, (r.endTime || r.time));
+                if (!_passesDate(dt, start, end)) return;
+
+                var ev2 = {
+                    ts: (function(){
+                        try{ return new Date(r.dateClean + "T" + (r.endTime || r.time)).getTime(); }catch(_){ return 0; }
+                    })(),
+                    dateClean: _fmt(r.dateClean),
+                    DateTime: dt,
+                    Type: type,
+                    Batch: _fmt(batchName),
+                    Carrier: _fmt(carrier),
+                    User: _fmt(r.user),
+                    Tracking: _fmt(r.track),
+                    Items_or_Content: _fmt(r.prods),
+                    Details: (type === "PACKING")
+                        ? ("Start: " + _fmt(r.startTime || r.time) + " | Confirm: " + _fmt(r.endTime || r.time))
+                        : "Return saved"
+                };
+
+                var k2 = _eventKey(ev2);
+                if(seen.has(k2)) return;
+                seen.add(k2);
+                events.push(ev2);
             });
 
-            events.sort(function(a, b){
+            // Sort newest -> oldest (ts preferred, fallback DateTime string)
+            events.sort(function(a,b){
+                var ta = Number(a.ts || 0), tb = Number(b.ts || 0);
+                if(tb !== ta) return tb - ta;
                 return _fmt(b.DateTime).localeCompare(_fmt(a.DateTime));
             });
 
-            if (!events.length) summary.status = "NOT FOUND";
-            summary.lastEvent = events.length ? _fmt(events[0].DateTime) : "";
+            // Summary
+            var summary = { status: "NOT FOUND" };
+            if(events.length){
+                // latest event determines display status; also keep packed/cancel meta
+                summary.lastEvent = _fmt(events[0].DateTime);
+
+                // best-effort: pick latest batch-created info for customer/content
+                var latestCreated = events.find(function(ev){ return _fmt(ev.Type) === "OFFICE / BATCH_CREATED"; });
+                if(latestCreated){
+                    summary.batchName = _fmt(latestCreated.Batch);
+                    summary.carrier = _fmt(latestCreated.Carrier);
+                    summary.customer = _fmt(latestCreated.Customer);
+                    summary.expectedContent = _fmt(latestCreated.Items_or_Content);
+                } else {
+                    // fallback from latest event
+                    summary.batchName = _fmt(events[0].Batch);
+                    summary.carrier = _fmt(events[0].Carrier);
+                }
+
+                var latestType = _fmt(events[0].Type);
+                if(latestType === "CANCELLED") summary.status = "CANCELLED";
+                else if(events.some(function(ev){ return _fmt(ev.Type) === "PACKING"; })) summary.status = "PACKED";
+                else if(events.some(function(ev){ return _fmt(ev.Type).indexOf("OFFICE") === 0; })) summary.status = "PENDING";
+                else summary.status = "FOUND";
+
+                // cancellation info (latest cancel event)
+                var cancelEv = events.find(function(ev){ return _fmt(ev.Type) === "CANCELLED"; });
+                if(cancelEv){
+                    summary.cancelReason = _fmt(cancelEv.Details).replace(/^Reason:\s*/,'');
+                    summary.cancelBy = _fmt(cancelEv.User);
+                    summary.cancelAt = _fmt(cancelEv.DateTime);
+                }
+
+                // packed info (latest packing event)
+                var packEv = events.find(function(ev){ return _fmt(ev.Type) === "PACKING"; });
+                if(packEv){
+                    summary.packedBy = _fmt(packEv.User);
+                    summary.packedAt = _fmt(packEv.DateTime);
+                    summary.tracking = _fmt(packEv.Tracking);
+                }
+            }
+
+            // Status filter for cards
+            var statusFilter = filters.status || "ALL";
+            if(statusFilter !== "ALL" && _fmt(summary.status) !== statusFilter){
+                // keep cache anyway, but card render will filter; still store
+            }
 
             searchCache.eventsById[sid] = events;
             searchCache.summaryById[sid] = summary;
@@ -1258,7 +1300,7 @@ function handleScan(v, mode) {
         _renderSearchCards();
     }
 
-    function loadPerformanceStats() {
+function loadPerformanceStats() {
         const date = document.getElementById('perf-date-filter').value;
         const tbody = document.querySelector('#perf-table tbody');
         let stats = {};
@@ -1273,6 +1315,28 @@ function handleScan(v, mode) {
     }
 
     function logBatchAction(bId, msg) { db.ref(`active_batches/${bId}/history`).push({ time: new Date().toLocaleString('pt-PT'), user: currentUser.email.split('@')[0].toUpperCase(), msg }); }
+
+
+
+    // --- NEW: Persistent per-ID history (covers cancelled + recreated IDs across batches) ---
+    function _nowDateClean(){ return new Date().toISOString().split('T')[0]; }
+    function _nowTime(){ return new Date().toLocaleTimeString('pt-PT'); }
+    function _dt(dateClean, timeStr){ return (String(dateClean||"") + " " + String(timeStr||"")).trim(); }
+
+    async function pushIdHistory(orderId, entry){
+        try{
+            if(!orderId) return;
+            const cleanId = String(orderId).trim();
+            const e = entry || {};
+            if(!e.ts) e.ts = Date.now();
+            if(!e.dateClean) e.dateClean = _nowDateClean();
+            if(!e.time) e.time = _nowTime();
+            if(!e.DateTime) e.DateTime = _dt(e.dateClean, e.time);
+            await db.ref(`id_history/${cleanId}`).push(e);
+        }catch(err){
+            console.error("pushIdHistory error", err);
+        }
+    }
 
     // --- NEW: INVENTORY QTY CHANGE LOGGING (shows in Modification Log) ---
     async function updateInventoryQty(batchId, skuKey, oldQty, newQtyVal) {
@@ -1667,7 +1731,7 @@ db.ref('config/carriers').on('value', s => {
               tD = document.getElementById('off-batch-date').value;
         if(!n || !tD) return alert("Missing info.");
 
-        const key = safeKey(n + "_" + c);
+        const key = safeKey(n + "_" + c + "_" + tD + "_" + Date.now());
 
         let inv = {};
         document.getElementById('off-products-list').value.split('\n').forEach(l => {
@@ -1688,7 +1752,7 @@ db.ref('config/carriers').on('value', s => {
         const createdBy = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
         const createdAt = new Date().toLocaleString('pt-PT');
 
-        db.ref('active_batches/'+key).set({
+        await db.ref('active_batches/'+key).set({
             name: n,
             carrier: c,
             expected_ids: ids,
@@ -1698,13 +1762,32 @@ db.ref('config/carriers').on('value', s => {
             dateClean: tD,
             createdBy: createdBy,
             createdAt: createdAt
-        }).then(() => {
-            alert("Created!");
-            document.getElementById('off-batch-name').value="";
-            document.getElementById('off-products-list').value="";
-            document.getElementById('off-order-meta').value="";
         });
-    }
+
+        // NEW: persist per-ID history so SEARCH can show all occurrences (cancelled + recreated)
+        const createdTime = new Date().toLocaleTimeString('pt-PT');
+        await Promise.all((ids || []).map(function(orderId){
+            const od = det[orderId] || {};
+            return pushIdHistory(orderId, {
+                Type: "OFFICE / BATCH_CREATED",
+                BatchKey: key,
+                Batch: n,
+                Carrier: c,
+                User: createdBy,
+                dateClean: tD,
+                time: createdTime,
+                Tracking: "",
+                Items_or_Content: od.content || "",
+                Customer: od.name || "",
+                Details: "Added to batch | Customer: " + (od.name || "")
+            });
+        }));
+
+        alert("Created!");
+        document.getElementById('off-batch-name').value="";
+        document.getElementById('off-products-list').value="";
+        document.getElementById('off-order-meta').value="";
+}
 
 function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: new Date().toLocaleTimeString('pt-PT'), dateClean: new Date().toISOString().split('T')[0] }).then(() => { resetScan(); loadPrePackHistory(); }); }
     function loadRecentReturns() { db.ref('registos').limitToLast(10).on('value', snap => { const tbody = document.querySelector('#recent-returns-table tbody'); tbody.innerHTML = ""; const data = snap.val(); if(!data) return; Object.keys(data).reverse().forEach(k => { const r = data[k]; if(r.mode === 'RETURN') tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; }); }); }
@@ -2110,6 +2193,29 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 
             // Log action in batch history
             logBatchAction(batchId, `CANCELLED ID: ${orderId} | Reason: ${payload.reason}`);
+
+            // NEW: persistent ID history so SEARCH shows cancelled even if the ID is recreated in new batches
+            try{
+                const bSnap = await db.ref(`active_batches/${batchId}`).once('value');
+                const b = bSnap.val() || {};
+                const dt = new Date();
+                const dc = dt.toISOString().split('T')[0];
+                const tm = dt.toLocaleTimeString('pt-PT');
+                await pushIdHistory(orderId, {
+                    Type: "CANCELLED",
+                    BatchKey: batchId,
+                    Batch: b.name || batchId,
+                    Carrier: b.carrier || "N/A",
+                    User: payload.user,
+                    dateClean: dc,
+                    time: tm,
+                    Tracking: "",
+                    Items_or_Content: "",
+                    Details: "Reason: " + payload.reason
+                });
+            }catch(err){
+                console.error("cancelBatchId pushIdHistory error", err);
+            }
 
             alert(`ID ${orderId} cancelado com sucesso.`);
         } catch (e) {
