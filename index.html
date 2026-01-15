@@ -158,6 +158,33 @@ window.exportMasterDB = exportMasterDB;
     </div>
 </div>
 
+
+<!-- MODAL: EDIT PACKED ITEMS -->
+<div id="edit-packed-items-modal" class="modal">
+    <div class="modal-content" style="max-width:900px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+            <h2 id="edit-packed-items-title" style="margin:0;">Edit Packed Items</h2>
+            <button class="btn-small btn-delete" onclick="closeModal('edit-packed-items-modal')">CLOSE</button>
+        </div>
+        <hr style="margin:16px 0;">
+
+        <div style="font-size:13px; color:#666; margin-bottom:10px;">
+            Remove apenas os itens picados por engano. O ID mantém-se PACKED.
+        </div>
+
+        <div id="edit-packed-items-list" style="display:flex; flex-wrap:wrap; gap:10px;"></div>
+
+        <div style="margin-top:16px;">
+            <label style="font-weight:900; font-size:12px; color:#666;">Nota (opcional)</label>
+            <input id="edit-packed-items-note" placeholder="Ex: removido SKU errado picado pelo operador" />
+        </div>
+
+        <button class="btn-submit" style="margin-top:16px; background:#0ea5e9;" onclick="savePackedItemsEditor()">
+            SAVE CORRECTION
+        </button>
+    </div>
+</div>
+
 <!-- MODAL: ID HISTORY -->
 <div id="id-history-modal" class="modal">
     <div class="modal-content">
@@ -1783,9 +1810,8 @@ function loadPerformanceStats() {
                 const actionCell = isCancelled
                     ? `<button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button>`
                     : (canCancel
-                        ? `<button class="btn-small btn-delete" style="background: var(--error); padding:10px 14px; font-size:11px;" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
+                        ? `${isPack ? `<button class="btn-small" style="background:#0ea5e9; margin-right:8px;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelExpectedId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
                         : '-');
-
                 html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
             });
             idsList.innerHTML = html + '</tbody></table>';
@@ -2048,7 +2074,142 @@ db.ref('config/carriers').on('value', s => {
     }
 
     function deleteBatch(id) { if(confirm("Apagar lote?")) db.ref('active_batches/'+id).remove(); }
-    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+    
+    // Helper (o OFF já tinha closeModal; isto complementa)
+    function openModal(id) { document.getElementById(id).style.display = 'block'; }
+
+    // ===== Packed Items Editor (corrigir itens dentro de IDs já PACKED) =====
+    let packedEditState = null;
+
+    function _splitPackedItems(prodsStr){
+        if(!prodsStr) return [];
+        return String(prodsStr)
+            .split('|')
+            .map(x => x.trim())
+            .filter(Boolean);
+    }
+
+    function renderPackedItemsEditor(){
+        const box = document.getElementById('edit-packed-items-list');
+        if(!box || !packedEditState) return;
+
+        box.innerHTML = packedEditState.items.map((it, idx) => {
+            const safe = String(it).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return `
+                <span class="prod-tag">
+                    ${safe}
+                    <button class="btn-small btn-delete" style="padding:6px 8px;" onclick="removePackedItemAt(${idx})">X</button>
+                </span>
+            `;
+        }).join('');
+
+        if(!packedEditState.items.length){
+            box.innerHTML = "<div style='padding:10px; color:#666;'>Sem itens (vai gravar como No Items).</div>";
+        }
+    }
+
+    function removePackedItemAt(idx){
+        if(!packedEditState) return;
+        const removed = packedEditState.items.splice(idx, 1)[0];
+        packedEditState.removed.push(removed);
+        renderPackedItemsEditor();
+    }
+
+    async function openPackedItemsEditor(batchKey, orderId){
+        // encontra o ÚLTIMO registo PACKING desse ID nesse batch
+        const snap = await db.ref('registos').once('value');
+        const all = snap.val() || {};
+
+        let best = null; // { key, r, sortKey }
+        Object.entries(all).forEach(([k, r]) => {
+            if(!r) return;
+            if(String(r.id||"").trim() !== String(orderId).trim()) return;
+            if(String(r.batch||"") !== String(batchKey)) return;
+
+            const mode = String(r.mode||"").toUpperCase();
+            if(mode !== "PACKING") return;
+
+            const sortKey = (r.dateClean || "") + " " + (r.endTime || r.time || "");
+            if(!best || sortKey > best.sortKey) best = { key: k, r, sortKey };
+        });
+
+        if(!best){
+            return alert("Não encontrei registo PACKING para este ID neste lote.");
+        }
+
+        packedEditState = {
+            batchKey,
+            orderId,
+            sourceKey: best.key,
+            source: best.r,
+            items: _splitPackedItems(best.r.prods || ""),
+            removed: []
+        };
+
+        document.getElementById('edit-packed-items-title').innerText =
+            `Edit Packed Items — ID ${orderId} (${batchKey})`;
+
+        document.getElementById('edit-packed-items-note').value = "";
+        renderPackedItemsEditor();
+        openModal('edit-packed-items-modal');
+    }
+
+    async function savePackedItemsEditor(){
+        if(!packedEditState) return;
+
+        const endTime = _nowTime();
+        const dc = _nowDateClean ? _nowDateClean() : new Date().toISOString().split('T')[0];
+        const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
+
+        const newProds = packedEditState.items.length ? packedEditState.items.join(' | ') : "No Items";
+        const note = (document.getElementById('edit-packed-items-note').value || "").trim();
+
+        // 1) grava um NOVO registo PACKING (correção) — fica “mais recente”
+        await db.ref('registos').push({
+            id: packedEditState.orderId,
+            track: packedEditState.source.track || "",
+            prods: newProds,
+            mode: "PACKING",
+            batch: packedEditState.batchKey,
+            user: uname,
+            startTime: packedEditState.source.startTime || endTime,
+            endTime: endTime,
+            time: endTime,
+            dateClean: dc,
+
+            // campos extra (opcionais, mas úteis)
+            correction: true,
+            correctionOf: packedEditState.sourceKey,
+            removedItems: packedEditState.removed.join(' | ') || ""
+        });
+
+        // 2) adiciona evento ao ID history (para auditoria / rastreio)
+        try{
+            const bName = (activeBatchData && activeBatchData.name) ? activeBatchData.name : packedEditState.batchKey;
+            const carr = (activeBatchData && activeBatchData.carrier) ? activeBatchData.carrier : "N/A";
+
+            await pushIdHistory(packedEditState.orderId, {
+                Type: "PACKING",
+                BatchKey: packedEditState.batchKey,
+                Batch: bName,
+                Carrier: carr,
+                User: uname,
+                dateClean: dc,
+                time: endTime,
+                Tracking: packedEditState.source.track || "",
+                Items_or_Content: newProds,
+                Details: `CORRECTION | removed: ${packedEditState.removed.join(' | ') || '(none)'}${note ? (" | note: " + note) : ""}`
+            });
+        }catch(e){
+            console.warn("pushIdHistory falhou (ignorado):", e);
+        }
+
+        closeModal('edit-packed-items-modal');
+        alert("Correção gravada (ID mantém-se PACKED).");
+    }
+
+
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
     function updateDashboardStats(all, fD) { 
         let nP = 0, nR = 0, nK = 0; for(let k in all) { let b = all[k]; if(b.dateClean === fD) { const requiredIds = getRequiredBatchIds(b);
             const nI = requiredIds.length, nE = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
