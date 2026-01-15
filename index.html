@@ -1810,7 +1810,7 @@ function loadPerformanceStats() {
                 const actionCell = isCancelled
                     ? `<button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button>`
                     : (canCancel
-                        ? `${isPack ? `<button class="btn-small" style="background:#0ea5e9; margin-right:8px;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelExpectedId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
+                        ? `${isPack ? `<button class="btn-small" style="background:#0ea5e9; margin-right:8px;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
                         : '-');
                 html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
             });
@@ -2874,6 +2874,12 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             alert("Erro ao cancelar o ID.");
         }
     }
+
+    // Alias (compat): some older UI code may call cancelExpectedId
+    function cancelExpectedId(batchId, orderId, wasPacked){
+        return cancelBatchId(batchId, orderId, wasPacked);
+    }
+
 
 </script>
 
