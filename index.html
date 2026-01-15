@@ -718,7 +718,7 @@ document.addEventListener('click', (e) => {
                         Status: status,
                         Cancel_Reason: cancelInfo ? (cancelInfo.reason || "") : "",
                         Cancelled_By: cancelInfo ? (cancelInfo.user || "") : "",
-                        Cancelled_At: cancelInfo ? (cancelInfo.time || "") : "",
+                        Cancelled_At: cancelInfo ? (cancelInfo.DateTime || cancelInfo.time || "") : "",
                         Packed_By: packRec ? (packRec.user || "") : "",
                         Packed_Date: packRec ? (packRec.dateClean || "") : "",
                         Packed_Start_Time: packRec ? (packRec.startTime || "") : "",
@@ -751,7 +751,7 @@ function handleScan(v, mode) {
             const prodName = masterProductsDB[key]; scanData.prods.push(prodName);
         } else if(/^\d{8}$/.test(v)) {
             // RECORD START TIME ON FIRST SCAN OF ID
-            if(!scanData.id) scanData.startTime = new Date().toLocaleTimeString('pt-PT');
+            if(!scanData.id) scanData.startTime = _nowTime();
             scanData.id = v; if(m === 'PACKING') showMetadata(v); 
         } else {
             scanData.track = v;
@@ -770,7 +770,7 @@ function handleScan(v, mode) {
         }
         if(!scanData.id || !scanData.track) return alert("Faltam dados!");
 
-        const endTime = new Date().toLocaleTimeString('pt-PT');
+        const endTime = _nowTime();
 
         try {
             if(m === 'PACKING' && bId) {
@@ -1048,15 +1048,15 @@ function handleScan(v, mode) {
         if (tbody) tbody.innerHTML = "";
         filtered.forEach(function(ev){
             if (!tbody) return;
-            tbody.innerHTML += "<tr>"
+            tbody.innerHTML += "<tr" + ((_fmt(ev.Type) === "CANCELLED") ? " style='background:#fff0f0; border-left:6px solid var(--error);'" : "") + ">"
                 + "<td>" + _fmt(ev.DateTime) + "</td>"
-                + "<td><b>" + _fmt(ev.Type) + "</b></td>"
+                + "<td><b style='" + ((_fmt(ev.Type) === "CANCELLED") ? "color:var(--error);" : "") + "'>" + _fmt(ev.Type) + "</b></td>"
                 + "<td>" + _fmt(ev.Batch) + "</td>"
                 + "<td>" + _fmt(ev.Carrier) + "</td>"
                 + "<td>" + _fmt(ev.User) + "</td>"
                 + "<td>" + _fmt(ev.Tracking) + "</td>"
                 + "<td><small>" + _fmt(ev.Items_or_Content) + "</small></td>"
-                + "<td><small>" + _fmt(ev.Details) + "</small></td>"
+                + "<td><small style='" + ((_fmt(ev.Type) === "CANCELLED") ? "color:var(--error); font-weight:900;" : "") + "'>" + _fmt(ev.Details) + "</small></td>"
                 + "</tr>";
         });
 
@@ -1145,17 +1145,21 @@ function handleScan(v, mode) {
         var regData = regSnap.val() || {};
 
         // Batch metadata for carrier/name enrichment
-        var batchSnap;
-        if (searchAll) {
-            batchSnap = await db.ref('active_batches').once('value');
-        } else {
-            var batchRef = db.ref('active_batches');
-            // keep it range-limited for performance; id_history already carries full batch created/cancel events
-            if (start && end) batchRef = batchRef.orderByChild('dateClean').startAt(start).endAt(end);
-            else batchRef = batchRef.orderByChild('dateClean');
-            batchSnap = await batchRef.once('value');
-        }
-        var batchData = batchSnap.val() || {};
+// NOTE: cancellations can be stored only inside active_batches/<batch>/cancelled_ids (older data),
+// so when searching CANCELLED (or status CANCELLED / search-all), load all batches for correct results.
+var batchSnap;
+var needAllBatches = searchAll || (filters && (filters.type === "CANCELLED" || filters.status === "CANCELLED"));
+if (needAllBatches) {
+    batchSnap = await db.ref('active_batches').once('value');
+} else {
+    var batchRef = db.ref('active_batches');
+    // keep it range-limited for performance; id_history already carries full batch created/cancel events (new data)
+    if (start && end) batchRef = batchRef.orderByChild('dateClean').startAt(start).endAt(end);
+    else batchRef = batchRef.orderByChild('dateClean');
+    batchSnap = await batchRef.once('value');
+}
+var batchData = batchSnap.val() || {};
+
 
         function _eventKey(ev){
             return [
@@ -1163,6 +1167,25 @@ function handleScan(v, mode) {
                 _fmt(ev.User), _fmt(ev.Tracking), _fmt(ev.Items_or_Content), _fmt(ev.Details)
             ].join("||");
         }
+
+        function _normalizeDateTimeAny(dtStr){
+    var s = _fmt(dtStr).trim();
+    if(!s) return "";
+    // already normalized like YYYY-MM-DD ...
+    if(/^\d{4}-\d{2}-\d{2}/.test(s)){
+        // accept "YYYY-MM-DD HH:mm:ss" or ISO "YYYY-MM-DDTHH:mm:ss"
+        s = s.replace('T',' ');
+        return s.length >= 19 ? s.slice(0,19) : s;
+    }
+    // pt-PT locale like "DD/MM/YYYY, HH:MM:SS" (or without seconds/comma)
+    var m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:,)?\s*(\d{2}:\d{2}(?::\d{2})?)/);
+    if(m){
+        var dd=m[1], mm=m[2], yy=m[3], tt=m[4];
+        if(tt.length===5) tt = tt + ":00";
+        return yy+"-"+mm+"-"+dd+" "+tt;
+    }
+    return s;
+}
 
         idsToSearch.forEach(function(sid, ix){
             var events = [];
@@ -1237,22 +1260,66 @@ function handleScan(v, mode) {
                 seen.add(k2);
                 events.push(ev2);
             });
+            // --- C) From active_batches cancelled_ids (backwards-compat for cancellations not stored in id_history) ---
+Object.entries(batchData).forEach(function(pair){
+    var bKey = pair[0];
+    var b = pair[1] || {};
+    if(!b || !b.cancelled_ids || !b.cancelled_ids[sid]) return;
 
-            // Sort newest -> oldest (ts preferred, fallback DateTime string)
+    var cinfo = b.cancelled_ids[sid] || {};
+    var dtRaw = cinfo.DateTime || ((cinfo.dateClean && cinfo.time) ? _dt(cinfo.dateClean, cinfo.time) : (cinfo.time || ""));
+    var dtNorm = _normalizeDateTimeAny(dtRaw);
+    var dc = _fmt(cinfo.dateClean) || (dtNorm ? dtNorm.slice(0,10) : "");
+    var tPart = _fmt(cinfo.time) || (dtNorm && dtNorm.length >= 19 ? dtNorm.slice(11,19) : "");
+    var ts3 = Number(cinfo.ts || 0);
+    if(!ts3 && dc && tPart){
+        try{ ts3 = new Date(dc + "T" + tPart).getTime(); }catch(_e){ ts3 = 0; }
+    }
+
+    var ev3 = {
+        ts: ts3,
+        dateClean: dc,
+        DateTime: dtNorm || _dtKey(dc, tPart),
+        Type: "CANCELLED",
+        Batch: _fmt(b.name || bKey),
+        Carrier: _fmt(b.carrier || "N/A"),
+        User: _fmt(cinfo.user || cinfo.User || ""),
+        Tracking: "",
+        Items_or_Content: "",
+        Details: "Reason: " + _fmt(cinfo.reason || cinfo.Reason || "")
+    };
+
+    if (!_passesDate(ev3.DateTime, start, end)) return;
+    if (!_passesType(ev3.Type, filters.type)) return;
+
+    var k3 = _eventKey(ev3);
+    if(seen.has(k3)) return;
+    seen.add(k3);
+    events.push(ev3);
+});
+
+            // Sort oldest -> newest (ts preferred, fallback DateTime string)
             events.sort(function(a,b){
                 var ta = Number(a.ts || 0), tb = Number(b.ts || 0);
-                if(tb !== ta) return tb - ta;
-                return _fmt(b.DateTime).localeCompare(_fmt(a.DateTime));
+                if(ta !== tb) return ta - tb;
+                return _fmt(a.DateTime).localeCompare(_fmt(b.DateTime));
             });
 
-            // Summary
+            // Summary (based on the LATEST event, but keeping cancel/pack meta if they happened at any point)
             var summary = { status: "NOT FOUND" };
             if(events.length){
-                // latest event determines display status; also keep packed/cancel meta
-                summary.lastEvent = _fmt(events[0].DateTime);
+                var latest = events[events.length - 1];
+                summary.lastEvent = _fmt(latest.DateTime);
 
-                // best-effort: pick latest batch-created info for customer/content
-                var latestCreated = events.find(function(ev){ return _fmt(ev.Type) === "OFFICE / BATCH_CREATED"; });
+                function _findLast(arr, predicate){
+                    for(var i = arr.length - 1; i >= 0; i--){
+                        if(predicate(arr[i])) return arr[i];
+                    }
+                    return null;
+                }
+
+                // pick latest batch-created info for customer/content (in case ID was re-added to new batch)
+                var latestCreated = _findLast(events, function(ev){ return _fmt(ev.Type) === "OFFICE / BATCH_CREATED"; });
                 if(latestCreated){
                     summary.batchName = _fmt(latestCreated.Batch);
                     summary.carrier = _fmt(latestCreated.Carrier);
@@ -1260,18 +1327,18 @@ function handleScan(v, mode) {
                     summary.expectedContent = _fmt(latestCreated.Items_or_Content);
                 } else {
                     // fallback from latest event
-                    summary.batchName = _fmt(events[0].Batch);
-                    summary.carrier = _fmt(events[0].Carrier);
+                    summary.batchName = _fmt(latest.Batch);
+                    summary.carrier = _fmt(latest.Carrier);
                 }
 
-                var latestType = _fmt(events[0].Type);
+                var latestType = _fmt(latest.Type);
                 if(latestType === "CANCELLED") summary.status = "CANCELLED";
-                else if(events.some(function(ev){ return _fmt(ev.Type) === "PACKING"; })) summary.status = "PACKED";
-                else if(events.some(function(ev){ return _fmt(ev.Type).indexOf("OFFICE") === 0; })) summary.status = "PENDING";
+                else if(_findLast(events, function(ev){ return _fmt(ev.Type) === "PACKING"; })) summary.status = "PACKED";
+                else if(_findLast(events, function(ev){ return _fmt(ev.Type).indexOf("OFFICE") === 0; })) summary.status = "PENDING";
                 else summary.status = "FOUND";
 
-                // cancellation info (latest cancel event)
-                var cancelEv = events.find(function(ev){ return _fmt(ev.Type) === "CANCELLED"; });
+                // cancellation info (latest cancel event - highlight in UI, but do not hide later re-creations)
+                var cancelEv = _findLast(events, function(ev){ return _fmt(ev.Type) === "CANCELLED"; });
                 if(cancelEv){
                     summary.cancelReason = _fmt(cancelEv.Details).replace(/^Reason:\s*/,'');
                     summary.cancelBy = _fmt(cancelEv.User);
@@ -1279,7 +1346,7 @@ function handleScan(v, mode) {
                 }
 
                 // packed info (latest packing event)
-                var packEv = events.find(function(ev){ return _fmt(ev.Type) === "PACKING"; });
+                var packEv = _findLast(events, function(ev){ return _fmt(ev.Type) === "PACKING"; });
                 if(packEv){
                     summary.packedBy = _fmt(packEv.User);
                     summary.packedAt = _fmt(packEv.DateTime);
@@ -1314,14 +1381,26 @@ function loadPerformanceStats() {
         });
     }
 
-    function logBatchAction(bId, msg) { db.ref(`active_batches/${bId}/history`).push({ time: new Date().toLocaleString('pt-PT'), user: currentUser.email.split('@')[0].toUpperCase(), msg }); }
+    function logBatchAction(bId, msg) {
+        const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
+        db.ref(`active_batches/${bId}/history`).push({ time: _nowDateTime(), user: uname, msg });
+    }
 
 
 
     // --- NEW: Persistent per-ID history (covers cancelled + recreated IDs across batches) ---
-    function _nowDateClean(){ return new Date().toISOString().split('T')[0]; }
-    function _nowTime(){ return new Date().toLocaleTimeString('pt-PT'); }
+    // Normalized date/time storage:
+    // - dateClean: YYYY-MM-DD
+    // - time: HH:mm:ss (24h, always with seconds)
+    // - DateTime: YYYY-MM-DD HH:mm:ss
+    function _nowDateClean(){ return new Date().toISOString().slice(0, 10); }
+    function _nowTime(){
+        return new Intl.DateTimeFormat('pt-PT', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        }).format(new Date());
+    }
     function _dt(dateClean, timeStr){ return (String(dateClean||"") + " " + String(timeStr||"")).trim(); }
+    function _nowDateTime(){ return _dt(_nowDateClean(), _nowTime()); }
 
     async function pushIdHistory(orderId, entry){
         try{
@@ -1750,7 +1829,7 @@ db.ref('config/carriers').on('value', s => {
         });
 
         const createdBy = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
-        const createdAt = new Date().toLocaleString('pt-PT');
+        const createdAt = _nowDateTime();
 
         await db.ref('active_batches/'+key).set({
             name: n,
@@ -1765,7 +1844,7 @@ db.ref('config/carriers').on('value', s => {
         });
 
         // NEW: persist per-ID history so SEARCH can show all occurrences (cancelled + recreated)
-        const createdTime = new Date().toLocaleTimeString('pt-PT');
+        const createdTime = _nowTime();
         await Promise.all((ids || []).map(function(orderId){
             const od = det[orderId] || {};
             return pushIdHistory(orderId, {
@@ -1789,7 +1868,7 @@ db.ref('config/carriers').on('value', s => {
         document.getElementById('off-order-meta').value="";
 }
 
-function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: new Date().toLocaleTimeString('pt-PT'), dateClean: new Date().toISOString().split('T')[0] }).then(() => { resetScan(); loadPrePackHistory(); }); }
+function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: new Date().toISOString().split('T')[0] }).then(() => { resetScan(); loadPrePackHistory(); }); }
     function loadRecentReturns() { db.ref('registos').limitToLast(10).on('value', snap => { const tbody = document.querySelector('#recent-returns-table tbody'); tbody.innerHTML = ""; const data = snap.val(); if(!data) return; Object.keys(data).reverse().forEach(k => { const r = data[k]; if(r.mode === 'RETURN') tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; }); }); }
     function loadPrePackHistory() { const fD = new Date().toISOString().split('T')[0]; db.ref('pre_packing').on('value', snap => { const tbody = document.querySelector('#prepack-recent-table tbody'); tbody.innerHTML = ""; if(!snap.val()) return; Object.keys(snap.val()).reverse().forEach(k => { const r = snap.val()[k]; if(r.dateClean === fD) tbody.innerHTML += `<tr><td>${r.time}</td><td>${r.product}</td><td><button class="btn-small btn-delete" onclick="db.ref('pre_packing/${k}').remove()">X</button></td></tr>`; }); }); }
     function updateDisplay(m) { const p = (m === 'RETURN' ? 'rv-' : 'v-'); document.getElementById(p+'id').innerText = scanData.id||"-"; document.getElementById(p+'track').innerText = scanData.track||"-"; const container = document.getElementById(p+'prods'); container.innerHTML = ""; scanData.prods.forEach(name => { container.innerHTML += `<div class="prod-tag"><span>${name}</span></div>`; }); }
@@ -2178,11 +2257,16 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             const reason = prompt(`Motivo do cancelamento para o ID ${orderId}?`);
             if (!reason || !reason.trim()) return;
 
+            const dc = _nowDateClean();
+            const tm = _nowTime();
             const payload = {
                 id: orderId,
                 reason: reason.trim(),
                 user: (currentUser && currentUser.email ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN"),
-            time: new Date().toLocaleString('pt-PT')
+                ts: Date.now(),
+                dateClean: dc,
+                time: tm,
+                DateTime: _dt(dc, tm)
             };
 
             // Store cancellation info
@@ -2198,9 +2282,8 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             try{
                 const bSnap = await db.ref(`active_batches/${batchId}`).once('value');
                 const b = bSnap.val() || {};
-                const dt = new Date();
-                const dc = dt.toISOString().split('T')[0];
-                const tm = dt.toLocaleTimeString('pt-PT');
+                const dc = _nowDateClean();
+                const tm = _nowTime();
                 await pushIdHistory(orderId, {
                     Type: "CANCELLED",
                     BatchKey: batchId,
