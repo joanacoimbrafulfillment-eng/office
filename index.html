@@ -2042,8 +2042,35 @@ async function removeCarrier(name) {
     }
 }
 
+// --- Overview: "Pre-Packed Today" = total products scanned in PRE-PACKING for the selected day (ALL operators) ---
+// Each scan in PRE-PACKING writes 1 record into /pre_packing (see handlePrePack push payload).
+let _prepackQuery = null;
+let _prepackCb = null;
+function startPrepackCardListener(fD){
+    try{
+        // detach previous listener (date changes)
+        if(_prepackQuery && _prepackCb){
+            _prepackQuery.off('value', _prepackCb);
+        }
+        // Query only the selected day; count records (= products scanned)
+        _prepackQuery = db.ref('pre_packing').orderByChild('dateClean').equalTo(fD);
+        _prepackCb = (snap) => {
+            const cnt = snap.exists() ? snap.numChildren() : 0;
+            const el = document.getElementById('card-prepack');
+            if(el) el.innerText = cnt;
+        };
+        _prepackQuery.on('value', _prepackCb);
+    }catch(e){
+        console.warn("startPrepackCardListener error:", e);
+    }
+}
+
+
+
 function syncGlobalData() {
         const fD = document.getElementById('global-date-filter').value;
+        startPrepackCardListener(fD);
+
         db.ref('active_batches').on('value', snap => {
             const bts = snap.val() || {}; 
             updateDashboardStats(bts, fD);
