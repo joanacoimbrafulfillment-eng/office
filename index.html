@@ -511,7 +511,7 @@ window.exportMasterDB = exportMasterDB;
     <div class="grid-2" style="margin-top:12px;">
       <div>
         <label style="font-weight:900;">Pesquisar</label>
-        <input id="master-search" placeholder="Pesquisar por nome ou barcode..." style="width:100%; padding:10px; border-radius:10px; border:1px solid #ddd;">
+        <input id="master-search" placeholder="Pesquisar por nome ou barcode..." style="width:100%; padding:10px; border-radius:10px; border:1px solid #ddd;" oninput="try{updateMasterPreview();}catch(e){}" onkeyup="try{updateMasterPreview();}catch(e){}">
         <div style="font-size:12px; color:#666; margin-top:6px;">A tabela atualiza automaticamente.</div>
       </div>
       <div>
@@ -685,7 +685,8 @@ document.addEventListener('click', (e) => {
         resetScan();
         if(id === 'sec-prepack') loadPrePackHistory();
         if(id === 'sec-returns') loadRecentReturns();
-    }
+            if(id === 'sec-masterdata') setTimeout(() => { try{ updateMasterPreview(); }catch(e){} }, 150);
+}
 
     function logout() { auth.signOut(); localStorage.removeItem('lastPackingBatch'); }
 
@@ -2095,7 +2096,121 @@ db.ref('config/carriers').on('value', s => {
         }
     }
     function updateMasterPreview() { const tbody = document.querySelector('#master-db-table tbody'), search = document.getElementById('master-search').value.toUpperCase(); tbody.innerHTML = ""; Object.keys(masterProductsDB).forEach(k => { if (k.includes(search) || masterProductsDB[k].toUpperCase().includes(search)) { tbody.innerHTML += `<tr><td>${k}</td><td>${masterProductsDB[k]}</td></tr>`; } }); }
-    function handleCSVUpload() { const fileInput = document.getElementById('csv-file-input'); if (!fileInput.files.length) return; const reader = new FileReader(); reader.onload = function(e) { const lines = e.target.result.split(/\r?\n/); const newMaster = {}; lines.forEach((line, index) => { if (index === 0 || !line.trim()) return; const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); if (parts.length >= 2) { let name = parts[0].replace(/^"|"$/g, '').trim(), bar = parts[1].replace(/^"|"$/g, '').trim(); if(bar) newMaster[safeKey(bar)] = name; } }); db.ref('config/master_products').set(newMaster).then(() => alert("Master Updated!")); }; reader.readAsText(fileInput.files[0]); }
+    function handleCSVUpload(){
+  const fileInput = document.getElementById('csv-file-input');
+  const statusEl  = document.getElementById('master-upload-status');
+
+  if(!fileInput || !fileInput.files || !fileInput.files.length){
+    alert("Selecione um ficheiro CSV primeiro.");
+    return;
+  }
+
+  // Split CSV line respecting quotes
+  function splitCSVLine(line, delim){
+    const out = [];
+    let cur = "";
+    let inQ = false;
+
+    for(let i=0;i<line.length;i++){
+      const ch = line[i];
+
+      if(ch === '"'){
+        // handle escaped quote ""
+        if(inQ && line[i+1] === '"'){
+          cur += '"';
+          i++;
+        }else{
+          inQ = !inQ;
+        }
+      }else if(ch === delim && !inQ){
+        out.push(cur);
+        cur = "";
+      }else{
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out;
+  }
+
+  function detectDelimiter(headerLine){
+    const delims = [',',';','\t'];
+    let best = ',';
+    let bestCount = 0;
+    delims.forEach(d=>{
+      const c = splitCSVLine(headerLine, d).length;
+      if(c > bestCount){
+        bestCount = c;
+        best = d;
+      }
+    });
+    return best;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async function(e){
+    try{
+      const txt = (e && e.target && e.target.result) ? String(e.target.result) : "";
+      const lines = txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+
+      if(lines.length < 2){
+        if(statusEl) statusEl.textContent = "CSV inválido: precisa de cabeçalho + pelo menos 1 linha de dados.";
+        alert("CSV inválido: precisa de cabeçalho + pelo menos 1 linha de dados.");
+        return;
+      }
+
+      const delim = detectDelimiter(lines[0]); // header
+      const newMaster = {};
+      let skipped = 0;
+
+      // Format requested:
+      // Coluna A = NOME DO PRODUTO
+      // Coluna B = CÓDIGO DE BARRAS
+      // Linha 1 = CABEÇALHO (ignorar)
+      for(let i=1;i<lines.length;i++){
+        const cols = splitCSVLine(lines[i], delim);
+        if(!cols || cols.length < 2){
+          skipped++;
+          continue;
+        }
+
+        const name = (cols[0] || "").replace(/^"|"$/g, "").trim();
+        const bar  = (cols[1] || "").replace(/^"|"$/g, "").trim();
+
+        if(!bar){
+          skipped++;
+          continue;
+        }
+
+        newMaster[String(bar).toUpperCase()] = name || "";
+      }
+
+      const total = Object.keys(newMaster).length;
+      if(total === 0){
+        const msg = "Não encontrei barcodes válidos. Confirma: Coluna A=Nome, Coluna B=Barcode, e a linha 1 é cabeçalho.";
+        if(statusEl) statusEl.textContent = msg;
+        alert(msg);
+        return;
+      }
+
+      if(statusEl) statusEl.textContent = "A enviar para a base de dados...";
+      await db.ref('config/master_products').set(newMaster);
+
+      masterProductsDB = newMaster;
+      if(statusEl) statusEl.textContent = "✅ Master Data atualizada ("+total+" barcodes). Linhas ignoradas: "+skipped+".";
+      try{ updateMasterPreview(); }catch(err){}
+
+      alert("Master Data carregada com sucesso ("+total+" barcodes).");
+      fileInput.value = "";
+    }catch(err){
+      console.error(err);
+      if(statusEl) statusEl.textContent = "Erro no upload: " + (err && err.message ? err.message : err);
+      alert("Erro a processar o CSV: " + (err && err.message ? err.message : err));
+    }
+  };
+  reader.readAsText(fileInput.files[0]);
+}
+
     async function createBatch() {
         const n = document.getElementById('off-batch-name').value.trim(),
               c = document.getElementById('off-carrier-select').value,
