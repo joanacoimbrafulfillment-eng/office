@@ -370,7 +370,64 @@ window.exportMasterDB = exportMasterDB;
             </div>
         </div>
 
-        <!-- SECTION: PICKING -->
+        
+        <!-- SECTION: CROSSCHECK (PACKED vs RETURNS) -->
+        <div id="sec-cross" class="section">
+            <div class="card">
+                <h2>Crosscheck: PACKED vs RETURNS</h2>
+                <p style="margin-top:6px; color:#666;">
+                    Cruza IDs que foram <b>PACKED</b> (saíram) com IDs em <b>RETURNS</b> (voltaram) e compara as picagens de produtos.
+                </p>
+
+                <div class="grid-2" style="margin-top:14px;">
+                    <div>
+                        <label>Start date</label>
+                        <input type="date" id="cross-start" />
+                    </div>
+                    <div>
+                        <label>End date</label>
+                        <input type="date" id="cross-end" />
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="checkbox" id="cross-only-returned" checked />
+                        Só IDs que voltaram
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        <input type="checkbox" id="cross-only-mismatch" />
+                        Só com diferenças (itens)
+                    </label>
+                    <button class="btn-submit" onclick="runCrosscheck()">RUN</button>
+                    <button class="btn-secondary" onclick="exportCrosscheck()">EXPORT XLSX</button>
+                    <span id="cross-status" style="color:#777;"></span>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:14px;">
+                <div id="cross-summary" style="display:flex; gap:18px; flex-wrap:wrap;"></div>
+                <div style="overflow:auto; margin-top:10px;">
+                    <table class="table" id="cross-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Packed At</th>
+                                <th>Returned At</th>
+                                <th>Packed Items</th>
+                                <th>Returned Items</th>
+                                <th>Missing (Packed → Returns)</th>
+                                <th>Extra (Returns → Packed)</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+<!-- SECTION: PICKING -->
         <div id="sec-picking" class="section">
             <div class="card">
                 <h2>🧺 Picking Phase</h2>
@@ -588,6 +645,7 @@ document.addEventListener('click', (e) => {
              <div class="nav-item" onclick="tab('sec-search', this)">SEARCH</div>
              <div class="nav-item" onclick="tab('sec-performance', this)">PERFORMANCE</div>
              <div class="nav-item" onclick="tab('sec-reports', this)">REPORTS</div>
+             <div class="nav-item" onclick="tab('sec-cross', this)">CROSSCHECK</div>
              <div class="nav-item" onclick="tab('sec-prepack', this)">PRE-PACKING</div>
              <div class="nav-item" onclick="tab('sec-masterdata', this)">MASTER DATA</div>
              <div class="nav-item" onclick="tab('sec-office', this)">OFFICE</div>
@@ -743,6 +801,240 @@ document.addEventListener('click', (e) => {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Report");
         XLSX.writeFile(wb, `WH_Export_${type}_${start}_to_${end}.xlsx`);
+    }
+
+    // =========================
+    // CROSSCHECK (PACKED vs RETURNS)
+    // =========================
+    let lastCrossRows = [];
+
+    function _escapeHtml(s){
+        return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+
+    function _normTime(t) {
+        if(!t) return "00:00:00";
+        t = String(t).trim();
+        // Accept "HH:mm" -> add seconds
+        if(/^\d{2}:\d{2}$/.test(t)) return t + ":00";
+        // Accept "HH:mm:ss"
+        if(/^\d{2}:\d{2}:\d{2}$/.test(t)) return t;
+        // Some locales might include seconds already; fallback: take first 8 chars if it resembles time
+        if(t.length >= 8 && /^\d{2}:\d{2}:\d{2}/.test(t)) return t.slice(0,8);
+        return "00:00:00";
+    }
+
+    function _splitItems(prodsStr) {
+        if(!prodsStr) return [];
+        const s = String(prodsStr).trim();
+        if(!s || s === "No Items") return [];
+        return s.split('|').map(x => x.trim()).filter(Boolean);
+    }
+
+    function _countItems(items) {
+        const m = {};
+        items.forEach(it => { m[it] = (m[it] || 0) + 1; });
+        return m;
+    }
+
+    function _diffCounts(packedCounts, returnsCounts) {
+        const missing = [];
+        const extra = [];
+        Object.keys(packedCounts).forEach(k => {
+            const d = packedCounts[k] - (returnsCounts[k] || 0);
+            if(d > 0) missing.push(`${k} x${d}`);
+        });
+        Object.keys(returnsCounts).forEach(k => {
+            const d = returnsCounts[k] - (packedCounts[k] || 0);
+            if(d > 0) extra.push(`${k} x${d}`);
+        });
+        return { missing, extra };
+    }
+
+    function _tsFrom(dc, tm) {
+        if(!dc) return 0;
+        const t = _normTime(tm);
+        const ms = new Date(`${dc}T${t}`).getTime();
+        return Number.isFinite(ms) ? ms : 0;
+    }
+
+    async function runCrosscheck() {
+        const statusEl = document.getElementById('cross-status');
+        const tbody = document.querySelector('#cross-table tbody');
+        const summaryEl = document.getElementById('cross-summary');
+
+        const start = document.getElementById('cross-start').value;
+        const end = document.getElementById('cross-end').value;
+        const onlyReturned = document.getElementById('cross-only-returned').checked;
+        const onlyMismatch = document.getElementById('cross-only-mismatch').checked;
+
+        statusEl.textContent = "Loading...";
+        tbody.innerHTML = "";
+        summaryEl.innerHTML = "";
+        lastCrossRows = [];
+
+        try {
+            let ref = db.ref('registos').orderByChild('dateClean');
+            if(start) ref = ref.startAt(start);
+            if(end) ref = ref.endAt(end);
+
+            const snap = await ref.once('value');
+            const data = snap.val() || {};
+
+            // per-id buckets
+            const perId = {}; // { [id]: { packed:[], returns:[] } }
+
+            Object.keys(data).forEach(k => {
+                const r = data[k];
+                if(!r || !r.id) return;
+                const modeRaw = (r.mode || r.Type || "").toString().trim().toUpperCase();
+                const isPacking = (modeRaw === "PACKING" || modeRaw === "PACKED");
+                const isReturn  = (modeRaw === "RETURNS" || modeRaw === "RETURN" || modeRaw === "RETURNED");
+                if(!isPacking && !isReturn) return;
+                const mode = isPacking ? "PACKING" : "RETURNS";
+
+                const id = String(r.id).trim();
+                if(!perId[id]) perId[id] = { packed: [], returns: [] };
+
+                const dc = r.dateClean || "";
+                const tm = _normTime(r.endTime || r.time || r.startTime);
+                const ts = (r.ts && Number.isFinite(r.ts)) ? r.ts : _tsFrom(dc, tm);
+                const dt = r.DateTime || (dc ? _dt(dc, tm) : "");
+                const items = _splitItems(r.prods);
+
+                const entry = {
+                    id,
+                    mode,
+                    batch: r.batch || "GENERAL",
+                    user: r.user || "",
+                    track: r.track || r.tracking || "",
+                    dateClean: dc,
+                    time: tm,
+                    DateTime: dt,
+                    ts: ts,
+                    prodsStr: r.prods || "",
+                    items: items
+                };
+
+                if(mode === "PACKING") perId[id].packed.push(entry);
+                else perId[id].returns.push(entry);
+            });
+
+            // Reduce per-id to latest packed + latest return after packed
+            const rows = [];
+            let packedIds = 0, returnedIds = 0, mismatchIds = 0;
+
+            Object.keys(perId).forEach(id => {
+                const b = perId[id];
+                if(!b.packed.length) return; // only consider IDs that "saíram"
+
+                packedIds += 1;
+
+                const packedLatest = b.packed.sort((a,b)=> (a.ts||0)-(b.ts||0)).slice(-1)[0];
+                const returnsAfter = b.returns.filter(x => (x.ts||0) > (packedLatest.ts||0));
+                const returnedLatest = returnsAfter.sort((a,b)=> (a.ts||0)-(b.ts||0)).slice(-1)[0];
+
+                const returned = !!returnedLatest;
+                if(onlyReturned && !returned) return;
+
+                const packedItems = packedLatest.items;
+                const returnItems = returnedLatest ? returnedLatest.items : [];
+
+                const packedCounts = _countItems(packedItems);
+                const returnCounts = _countItems(returnItems);
+                const diff = _diffCounts(packedCounts, returnCounts);
+
+                const hasMismatch = (diff.missing.length || diff.extra.length);
+                if(onlyMismatch && !hasMismatch) return;
+
+                if(returned) returnedIds += 1;
+                if(hasMismatch) mismatchIds += 1;
+
+                rows.push({
+                    id,
+                    packedAt: packedLatest.DateTime || _dt(packedLatest.dateClean, packedLatest.time),
+                    returnedAt: returnedLatest ? (returnedLatest.DateTime || _dt(returnedLatest.dateClean, returnedLatest.time)) : "",
+                    packedCount: packedItems.length,
+                    returnCount: returnItems.length,
+                    missing: diff.missing,
+                    extra: diff.extra,
+                    packed: packedLatest,
+                    returned: returnedLatest
+                });
+            });
+
+            // Sort: most recent packed first
+            rows.sort((a,b)=> (_tsFrom(a.packed.dateClean, a.packed.time) - _tsFrom(b.packed.dateClean, b.packed.time)));
+
+            // Render summary
+            summaryEl.innerHTML = `
+                <div><b>Packed IDs</b>: ${packedIds}</div>
+                <div><b>Returned</b>: ${returnedIds}</div>
+                <div><b>Not returned</b>: ${Math.max(0, packedIds - returnedIds)}</div>
+                <div><b>Mismatches</b>: ${mismatchIds}</div>
+                <div style="color:#777;">(Filtro aplicado: ${onlyReturned ? "returned only" : "all packed"}, ${onlyMismatch ? "mismatch only" : "all"})</div>
+            `;
+
+            // Render table
+            tbody.innerHTML = rows.map(r => {
+                const miss = r.missing.length ? r.missing.join('<br>') : "-";
+                const extra = r.extra.length ? r.extra.join('<br>') : "-";
+                const packedList = r.packed.items.length ? r.packed.items.map(x=>`• ${_escapeHtml(x)}`).join('<br>') : "(none)";
+                const returnList = (r.returned && r.returned.items.length) ? r.returned.items.map(x=>`• ${_escapeHtml(x)}`).join('<br>') : "(none)";
+                const det = `
+                  <details>
+                    <summary>View</summary>
+                    <div style="margin-top:6px;">
+                      <div style="font-weight:bold; margin-bottom:4px;">PACKED</div>
+                      <div style="font-size:12px; color:#555;">${packedList}</div>
+                      <div style="font-weight:bold; margin:10px 0 4px;">RETURNS</div>
+                      <div style="font-size:12px; color:#555;">${returnList}</div>
+                    </div>
+                  </details>`;
+                return `<tr>
+                    <td>${_escapeHtml(r.id)}</td>
+                    <td>${_escapeHtml(r.packedAt || "")}</td>
+                    <td>${_escapeHtml(r.returnedAt || "")}</td>
+                    <td style="text-align:center;">${r.packedCount}</td>
+                    <td style="text-align:center;">${r.returnCount}</td>
+                    <td style="font-size:12px;">${miss}</td>
+                    <td style="font-size:12px;">${extra}</td>
+                    <td>${det}</td>
+                </tr>`;
+            }).join("");
+
+            lastCrossRows = rows;
+            statusEl.textContent = `Done (${rows.length} rows).`;
+        } catch (e) {
+            console.error(e);
+            statusEl.textContent = "";
+            alert("Erro no crosscheck.");
+        }
+    }
+
+    function exportCrosscheck() {
+        if(!lastCrossRows || !lastCrossRows.length) return alert("Sem dados para exportar. Corre primeiro o RUN.");
+        const out = lastCrossRows.map(r => ({
+            ID: r.id,
+            Packed_At: r.packedAt,
+            Returned_At: r.returnedAt,
+            Packed_Items: r.packedCount,
+            Returned_Items: r.returnCount,
+            Missing: r.missing.join(" | "),
+            Extra: r.extra.join(" | "),
+            Packed_Batch: (r.packed && r.packed.batch) ? r.packed.batch : "",
+            Returns_Batch: (r.returned && r.returned.batch) ? r.returned.batch : "",
+            Packed_Tracking: (r.packed && r.packed.track) ? r.packed.track : "",
+            Returns_Tracking: (r.returned && r.returned.track) ? r.returned.track : ""
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(out);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Crosscheck");
+        const s = document.getElementById('cross-start').value || "ALL";
+        const e = document.getElementById('cross-end').value || "ALL";
+        XLSX.writeFile(wb, `WH_Crosscheck_PACKED_vs_RETURNS_${s}_to_${e}.xlsx`);
     }
 function handleScan(v, mode) {
         const m = mode || currentMode;
@@ -2314,7 +2606,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 /* === STRONG PAGE PROFILE GUARD (ADMIN) === */
 (function(){
   var PROFILE = "ADMIN";
-  var ALLOWED = ['sec-overview', 'sec-office', 'sec-search', 'sec-reports', 'sec-performance', 'sec-masterdata'];
+  var ALLOWED = ['sec-overview', 'sec-office', 'sec-search', 'sec-cross', 'sec-reports', 'sec-performance', 'sec-masterdata'];
 
   function isAllowed(id){ return !!id && ALLOWED.indexOf(String(id)) !== -1; }
 
