@@ -1468,7 +1468,7 @@ function handleScan(v, mode) {
 // NOTE: cancellations can be stored only inside active_batches/<batch>/cancelled_ids (older data),
 // so when searching CANCELLED (or status CANCELLED / search-all), load all batches for correct results.
 var batchSnap;
-var needAllBatches = searchAll || (filters && (filters.type === "CANCELLED" || filters.status === "CANCELLED"));
+var needAllBatches = true;
 if (needAllBatches) {
     batchSnap = await db.ref('active_batches').once('value');
 } else {
@@ -1618,7 +1618,73 @@ Object.entries(batchData).forEach(function(pair){
     events.push(ev3);
 });
 
-            // Sort oldest -> newest (ts preferred, fallback DateTime string)
+            
+            // --- D) From active_batches expected_ids (fallback): show IDs even if only in a created batch ---
+            // This guarantees SEARCH shows PENDING IDs that were added to a batch but have no registos yet,
+            // and also covers older batches where id_history may be missing.
+            (function(){
+                try{
+                    // If filters hide everything, we still want to show that the ID exists in some batch.
+                    var allowOutOfRange = (events.length === 0);
+
+                    Object.entries(batchData).forEach(function(pair){
+                        var bKey = pair[0];
+                        var b = pair[1] || {};
+                        if(!b || !b.expected_ids) return;
+
+                        // expected_ids can be array
+                        var ex = b.expected_ids || [];
+                        if(!Array.isArray(ex)) ex = Object.values(ex);
+
+                        if(ex.indexOf(sid) === -1) return;
+
+                        var od = (b.order_details && b.order_details[sid]) ? b.order_details[sid] : {};
+                        var batchName = _fmt(b.name || bKey);
+                        var carrier = _fmt(b.carrier || "N/A");
+
+                        // Prefer createdAt (real creation timestamp), else fall back to batch date.
+                        var dtRaw = _fmt(b.createdAt || "");
+                        var dtNorm = dtRaw ? _normalizeDateTimeAny(dtRaw) : "";
+                        var dc = _fmt(b.dateClean || "") || (dtNorm ? dtNorm.slice(0,10) : "");
+                        if(!dtNorm){
+                            // if we only have dateClean, give it a safe time
+                            dtNorm = dc ? (dc + " 00:00:00") : "";
+                        }
+                        // Compute ts from dtNorm if possible
+                        var ts4 = 0;
+                        if(dtNorm && /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(dtNorm)){
+                            try{ ts4 = new Date(dtNorm.slice(0,10) + "T" + dtNorm.slice(11,19)).getTime(); }catch(_e){ ts4 = 0; }
+                        }
+
+                        var ev4 = {
+                            ts: ts4,
+                            dateClean: dc,
+                            DateTime: dtNorm,
+                            Type: "OFFICE / BATCH_CREATED",
+                            Batch: batchName,
+                            Carrier: carrier,
+                            User: _fmt(b.createdBy || ""),
+                            Tracking: "",
+                            Items_or_Content: _fmt((od && od.content) ? od.content : ""),
+                            Details: "Added to batch | Customer: " + _fmt((od && od.name) ? od.name : ""),
+                            Customer: _fmt((od && od.name) ? od.name : "")
+                        };
+
+                        // Respect type filter always; date filter only if it wouldn't hide everything
+                        if (!_passesType(ev4.Type, filters.type)) return;
+                        if (!allowOutOfRange && !_passesDate(ev4.DateTime, start, end)) return;
+
+                        var k4 = _eventKey(ev4);
+                        if(seen.has(k4)) return;
+                        seen.add(k4);
+                        events.push(ev4);
+                    });
+                }catch(e){
+                    console.warn("batch expected_ids fallback error:", e);
+                }
+            })();
+
+// Sort oldest -> newest (ts preferred, fallback DateTime string)
             events.sort(function(a,b){
                 var ta = Number(a.ts || 0), tb = Number(b.ts || 0);
                 if(ta !== tb) return ta - tb;
