@@ -683,8 +683,15 @@ document.addEventListener('click', (e) => {
              <div class="nav-item" onclick="tab('sec-prepack', this)">PRE-PACKING</div>
              <div class="nav-item" onclick="tab('sec-returns', this)">RETURNS</div>
              <div class="nav-item" onclick="tab('sec-warehouse', this)">PACKING</div>`;
-        
-        syncGlobalData();
+
+        // Default Overview day to today (Overview is realtime by default)
+        const df = document.getElementById('global-date-filter');
+        if(df && !df.value) df.value = _todayDateClean();
+
+        // Wire single-instance listeners (active_batches + config)
+        initRealtimeCore();
+
+        // Open initial tab (tab() will set _currentSection and render Overview if needed)
         if(isAdmin) tab('sec-overview', document.querySelector('[onclick*="sec-overview"]'));
         else tab('sec-picking', document.querySelector('[onclick*="sec-picking"]'));
     }
@@ -699,6 +706,8 @@ document.addEventListener('click', (e) => {
             }
         }
 
+        _currentSection = id;
+
         document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         document.getElementById(id).classList.add('active');
@@ -708,11 +717,18 @@ document.addEventListener('click', (e) => {
             const saved = localStorage.getItem('lastPackingBatch');
             if(saved) { setTimeout(() => { const sel = document.getElementById('wh-batch-select'); if(sel && sel.querySelector(`option[value="${saved}"]`)) { sel.value = saved; loadBatchData(saved); } }, 300); }
         }
-        
         resetScan();
         if(id === 'sec-prepack') loadPrePackHistory();
         if(id === 'sec-returns') loadRecentReturns();
-            if(id === 'sec-masterdata') setTimeout(() => { try{ updateMasterPreview(); }catch(e){} }, 150);
+        if(id === 'sec-masterdata') setTimeout(() => { try{ updateMasterPreview(); }catch(e){} }, 150);
+
+        // Overview: realtime only for today; old days only when user changes the date
+        if(id === 'sec-overview') {
+            syncGlobalData();
+        } else {
+            // Leaving overview => drop its realtime listener to keep mobile light
+            stopPrepackCardListener();
+        }
 }
 
     function logout() { auth.signOut(); localStorage.removeItem('lastPackingBatch'); }
@@ -2119,7 +2135,11 @@ function startPrepackCardListener(fD){
             _prepackQuery.off('value', _prepackCb);
         }
         // Query only the selected day; count records (= products scanned)
-        _prepackQuery = db.ref('pre_packing').orderByChild('dateClean').equalTo(fD);
+        _prepackQuery = db.ref('pre_packing')
+            .orderByChild('dateClean')
+            .equalTo(fD)
+            .limitToLast(800);
+
         _prepackCb = (snap) => {
             const cnt = snap.exists() ? snap.numChildren() : 0;
             const el = document.getElementById('card-prepack');
@@ -2130,32 +2150,118 @@ function startPrepackCardListener(fD){
         console.warn("startPrepackCardListener error:", e);
     }
 }
+function stopPrepackCardListener(){
+    try{
+        if(_prepackQuery && _prepackCb) _prepackQuery.off('value', _prepackCb);
+    }catch(e){}
+    _prepackQuery = null;
+    _prepackCb = null;
+}
+function loadPrepackCardOnce(fD){
+    try{
+        db.ref('pre_packing')
+          .orderByChild('dateClean')
+          .equalTo(fD)
+          .limitToLast(800)
+          .once('value')
+          .then(snap => {
+              const cnt = snap.exists() ? snap.numChildren() : 0;
+              const el = document.getElementById('card-prepack');
+              if(el) el.innerText = cnt;
+          });
+    }catch(e){
+        console.warn("loadPrepackCardOnce error:", e);
+    }
+}
 
+// ===== Realtime core wiring (avoid duplicate listeners) =====
+let _activeBatchesRef = null;
+let _activeBatchesCb  = null;
+let _activeBatchesCache = {};
+let _configWired = false;
+let _currentSection = "";
 
+function _todayDateClean(){
+    try{ if(typeof _nowDateClean === 'function') return _nowDateClean(); }catch(e){}
+    return new Date().toISOString().split('T')[0];
+}
+function _selectedOverviewDate(){
+    const el = document.getElementById('global-date-filter');
+    return (el && el.value) ? el.value : _todayDateClean();
+}
+function _overviewActive(){
+    return _currentSection === 'sec-overview';
+}
 
-function syncGlobalData() {
-        const fD = document.getElementById('global-date-filter').value;
-        startPrepackCardListener(fD);
+function initRealtimeCore(){
+    // active batches: keep 1 listener for the whole app (used by selects, packing, picking)
+    if(!_activeBatchesRef){
+        _activeBatchesRef = db.ref('active_batches');
+        _activeBatchesCb = (snap) => {
+            _activeBatchesCache = snap.val() || {};
 
-        db.ref('active_batches').on('value', snap => {
-            const bts = snap.val() || {}; 
-            updateDashboardStats(bts, fD);
-            renderManagementUI(bts, fD);
-            updateSelects(bts, fD);
+            // Always keep batch selects up to date (all sections)
+            try{ updateSelects(_activeBatchesCache, _selectedOverviewDate()); }catch(e){}
+
+            // Only auto-refresh OVERVIEW when it is open AND date == today
+            const fD = _selectedOverviewDate();
+            if(_overviewActive() && fD === _todayDateClean()){
+                try{ updateDashboardStats(_activeBatchesCache, fD); }catch(e){}
+                try{ renderManagementUI(_activeBatchesCache, fD); }catch(e){}
+            }
+        };
+        _activeBatchesRef.on('value', _activeBatchesCb);
+    }
+
+    // config listeners: wire once
+    if(!_configWired){
+        _configWired = true;
+
+        db.ref('config/master_products').on('value', s => {
+            masterProductsDB = s.val() || {};
+            try{ if(typeof updateMasterPreview==='function') updateMasterPreview(); }catch(e){}
         });
-        db.ref('config/master_products').on('value', s => { masterProductsDB = s.val() || {}; try{ if(typeof updateMasterPreview==='function') updateMasterPreview(); }catch(e){} });
-db.ref('config/carriers').on('value', s => { 
-            const carriers = s.val() || ["CTT", "NACEX", "CORREOS"]; 
-            const sel = document.getElementById('off-carrier-select'); 
-            if(sel) { 
-                sel.innerHTML = ""; 
-                carriers.forEach(c => sel.innerHTML += `<option value="${c}">${c}</option>`); 
+
+        db.ref('config/carriers').on('value', s => {
+            const carriers = s.val() || ["CTT", "NACEX", "CORREOS"];
+            const sel = document.getElementById('off-carrier-select');
+            if(sel){
+                sel.innerHTML = "";
+                (Array.isArray(carriers) ? carriers : Object.values(carriers)).forEach(c => {
+                    sel.innerHTML += `<option value="${c}">${c}</option>`;
+                });
             }
             // also render admin list in OFFICE (if present)
             try { renderCarrierAdminList(Array.isArray(carriers) ? carriers : Object.values(carriers)); } catch(e) {}
-        });}
+        });
+    }
+}
 
-    function showMetadata(id) {
+// OVERVIEW behavior:
+// - If selected day == today: realtime updates (cards + kanban)
+// - If selected day != today: snapshot only (no continuous updates) => old data only when user deliberately changes the date
+function syncGlobalData() {
+    const fD = _selectedOverviewDate();
+    const today = _todayDateClean();
+
+    // Only render/attach listeners when OVERVIEW is visible
+    if(!_overviewActive()) return;
+
+    if(fD === today){
+        startPrepackCardListener(fD);
+    }else{
+        stopPrepackCardListener();
+        loadPrepackCardOnce(fD);
+    }
+
+    // render immediately from the latest cache we have
+    const bts = _activeBatchesCache || {};
+    try{ updateDashboardStats(bts, fD); }catch(e){}
+    try{ renderManagementUI(bts, fD); }catch(e){}
+    try{ updateSelects(bts, fD); }catch(e){}
+}
+
+function showMetadata(id) {
         if(!activeBatchData) return;
         const cb = document.getElementById('meta-cancel-banner');
         if(activeBatchData.cancelled_ids && activeBatchData.cancelled_ids[id]) cb.style.display = 'flex'; else cb.style.display = 'none';
