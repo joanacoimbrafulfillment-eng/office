@@ -617,6 +617,10 @@ window.exportMasterDB = exportMasterDB;
     let isAdminUser = false;
     let masterProductsDB = {}, currentMode = "PACKING", activeBatchData = null, activeBatchPath = null;
 
+    // --- PERF: keep only one modal listener at a time (prevents modal reopening itself) ---
+    let __modalBatchRef = null;
+    let __modalBatchCb = null;
+
     function safeKey(str) { if(!str) return "UNKNOWN"; return str.toString().replace(/[.#$/[\]]/g, "_").trim().toUpperCase(); }
 
     
@@ -1788,6 +1792,39 @@ function loadPerformanceStats() {
         db.ref(`active_batches/${bId}/history`).push({ time: _nowDateTime(), user: uname, msg });
     }
 
+    // --- INVENTORY MODIFICATION HELPERS (logs qty changes + deletions) ---
+    async function updateInvQty(batchId, sku, newVal){
+        try{
+            const newQ = parseInt(newVal, 10);
+            if(isNaN(newQ) || newQ < 0) return alert("Qtd inválida.");
+            const qRef = db.ref(`active_batches/${batchId}/inventory/${sku}/q`);
+            const prevSnap = await qRef.once('value');
+            const oldQ = prevSnap.val();
+            if(oldQ === newQ) return; // no change
+
+            await qRef.set(newQ);
+            logBatchAction(batchId, `INV QTY ${sku}: ${oldQ} -> ${newQ}`);
+        }catch(e){
+            console.error(e);
+            alert("Erro ao atualizar quantidade.");
+        }
+    }
+
+    async function deleteInvSku(batchId, sku){
+        try{
+            if(!confirm(`Remover produto "${sku}" do lote?`)) return;
+            const itemRef = db.ref(`active_batches/${batchId}/inventory/${sku}`);
+            const prevSnap = await itemRef.once('value');
+            const old = prevSnap.val() || {};
+            await itemRef.remove();
+            logBatchAction(batchId, `INV DEL ${sku} (q=${old.q || 0}, pos=${old.pos || ""})`);
+        }catch(e){
+            console.error(e);
+            alert("Erro ao remover produto.");
+        }
+    }
+
+
 
 
     // --- NEW: Persistent per-ID history (covers cancelled + recreated IDs across batches) ---
@@ -1848,44 +1885,64 @@ function loadPerformanceStats() {
         }
     }
 
-
     function openEditModal(batchId, readOnly = false) {
         if(!batchId) return;
-        db.ref('active_batches/'+batchId).on('value', snap => {
-            const b = snap.val(); if(!b) return;
+
+        // Show modal ONCE (do not re-open on every realtime update)
+        const modal = document.getElementById('edit-batch-modal');
+        if(modal) modal.style.display = 'flex';
+
+        // Detach previous modal listener (avoid duplicate callbacks + auto reopening)
+        if(__modalBatchRef && __modalBatchCb) {
+            __modalBatchRef.off('value', __modalBatchCb);
+        }
+
+        __modalBatchRef = db.ref('active_batches/' + batchId);
+        __modalBatchCb = (snap) => {
+            const b = snap.val();
+            if(!b) return;
+
             document.getElementById('edit-batch-title').innerText = b.name;
-            document.getElementById('modal-delete-btn').style.display = (readOnly || !currentUser.email.endsWith('@admin.com')) ? 'none' : 'block';
-            const tbody = document.querySelector('#edit-inventory-table tbody'); tbody.innerHTML = "";
+            document.getElementById('modal-delete-btn').style.display =
+                (readOnly || !currentUser.email.endsWith('@admin.com')) ? 'none' : 'block';
+
+            const tbody = document.querySelector('#edit-inventory-table tbody');
+            tbody.innerHTML = "";
             Object.keys(b.inventory || {}).sort().forEach(k => {
                 const it = b.inventory[k];
-                tbody.innerHTML += `<tr><td>${k}</td><td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInventoryQty('${batchId}', '${k}', ${it.q}, this.value)">`}</td><td>${it.pos}</td>${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="removeInventoryItem('${batchId}', '${k}', ${it.q})">X</button></td>`}</tr>`;
+                tbody.innerHTML += `<tr>
+                    <td>${k}</td>
+                    <td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInvQty('${batchId}','${k}', this.value)">`}</td>
+                    <td>${it.pos}</td>
+                    ${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="deleteInvSku('${batchId}','${k}')">X</button></td>`}
+                </tr>`;
             });
+
             const idsList = document.getElementById('edit-ids-list');
             let html = '<table><thead><tr><th>ID</th><th>Cliente</th><th>Content</th><th>Status</th><th>Ação</th></tr></thead><tbody>';
-            (b.expected_ids||[]).forEach(id => {
+
+            (b.expected_ids || []).forEach(id => {
                 const isPack = (b.processed_ids && b.processed_ids[id]);
                 const isCancelled = (b.cancelled_ids && b.cancelled_ids[id]);
-                const det = (b.order_details||{})[id] || {name:"N/A", content:"N/A"};
+                const det = (b.order_details || {})[id] || {name:"N/A"};
                 const cancelInfo = isCancelled ? b.cancelled_ids[id] : null;
-
-                const idCell = isCancelled
-                    ? `<span style="color:#b91c1c; text-decoration:line-through; font-weight:900;">${id}</span>`
-                    : `<b>${id}</b>`;
-
-                const nameCell = isCancelled
-                    ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.name || 'N/A'}</span>`
-                    : `${det.name || 'N/A'}`;
-
-                const contentCell = isCancelled
-                    ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.content || 'N/A'}</span>`
-                    : `${det.content || 'N/A'}`;
 
                 let statusTxt = 'PENDING';
                 if (isPack) statusTxt = 'PACKED';
                 if (isCancelled) statusTxt = 'CANCELADO';
 
+                const reason = (cancelInfo && cancelInfo.reason) ? cancelInfo.reason : "";
+
+                const idCell = isCancelled
+                    ? `<b style="color:#b91c1c;" title="${reason ? ('CANCELADO: ' + reason) : ''}">${id}</b>`
+                    : `<b>${id}</b>`;
+
+                const nameCell = det.name || "N/A";
+                const contentCell = `<small>${det.content || 'N/A'}</small>`;
+
                 const statusCell = isCancelled
-                    ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span><div style="font-size:12px; color:#991b1b; margin-top:4px;">${(cancelInfo && cancelInfo.reason) ? ('Motivo: ' + cancelInfo.reason) : ''}</div>`
+                    ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span>
+                       <div style="font-size:12px; color:#991b1b; margin-top:4px;">${reason ? ('Motivo: ' + reason) : ''}</div>`
                     : (isPack ? '<span style="color:#166534; font-weight:900;">PACKED</span>' : '<span style="color:#92400e; font-weight:900;">PENDING</span>');
 
                 const canCancel = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
@@ -1894,16 +1951,38 @@ function loadPerformanceStats() {
                     : (canCancel
                         ? `${isPack ? `<button class="btn-small" style="background:#0ea5e9; margin-right:8px;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
                         : '-');
-                html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
+
+                html += `<tr>
+                    <td>${idCell}</td>
+                    <td>${nameCell}</td>
+                    <td>${contentCell}</td>
+                    <td>${statusCell}</td>
+                    <td>${actionCell}</td>
+                </tr>`;
             });
+
             idsList.innerHTML = html + '</tbody></table>';
-            const logBox = document.getElementById('qty-modification-log'); logBox.innerHTML = "";
-            if(b.history) { Object.values(b.history).reverse().forEach(log => { logBox.innerHTML += `<div style="border-bottom:1px solid #eee; padding:4px;"><b>[${log.time}] ${log.user}:</b> ${log.msg}</div>`; }); }
-            const cancelBox = document.getElementById('cancelled-ids-log'); cancelBox.innerHTML = "";
-            if(b.cancelled_ids) { Object.values(b.cancelled_ids).reverse().forEach(c => { cancelBox.innerHTML += `<div><b>ID ${c.id}:</b> ${c.reason} <br><small>By ${c.user} at ${c.time}</small></div>`; }); }
-            document.getElementById('edit-batch-modal').style.display = 'flex';
-        });
+
+            const logBox = document.getElementById('qty-modification-log');
+            logBox.innerHTML = "";
+            if(b.history) {
+                Object.values(b.history).reverse().forEach(log => {
+                    logBox.innerHTML += `<div style="border-bottom:1px solid #eee; padding:4px;"><b>[${log.time}] ${log.user}:</b> ${log.msg}</div>`;
+                });
+            }
+
+            const cancelBox = document.getElementById('cancelled-ids-log');
+            cancelBox.innerHTML = "";
+            if(b.cancelled_ids) {
+                Object.values(b.cancelled_ids).reverse().forEach(c => {
+                    cancelBox.innerHTML += `<div><b>ID ${c.id}:</b> ${c.reason} <br><small>By ${c.user} at ${c.time}</small></div>`;
+                });
+            }
+        };
+
+        __modalBatchRef.on('value', __modalBatchCb);
     }
+
 
     function loadBatchData(bId) {
         if(!bId) return; 
@@ -2407,8 +2486,18 @@ function showMetadata(id) {
         alert("Correção gravada (ID mantém-se PACKED).");
     }
 
+    function closeModal(id) {
+        const el = document.getElementById(id);
+        if(el) el.style.display = 'none';
 
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        // If closing batch details modal, detach its realtime listener
+        if(id === 'edit-batch-modal' && __modalBatchRef && __modalBatchCb) {
+            __modalBatchRef.off('value', __modalBatchCb);
+            __modalBatchRef = null;
+            __modalBatchCb = null;
+        }
+    }
+
     function updateDashboardStats(all, fD) { 
         let nP = 0, nR = 0, nK = 0; for(let k in all) { let b = all[k]; if(b.dateClean === fD) { const requiredIds = getRequiredBatchIds(b);
             const nI = requiredIds.length, nE = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
