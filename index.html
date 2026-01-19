@@ -665,10 +665,6 @@ document.addEventListener('click', (e) => {
         try { await auth.signInWithEmailAndPassword(e, p); } catch(e) { alert("Invalid credentials."); }
     }
 
-    // Ensure inline onclick=\"handleLogin()\" works
-    window.handleLogin = handleLogin;
-
-
     function setupUI(email) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('main-interface').style.display = 'block';
@@ -1890,40 +1886,12 @@ function loadPerformanceStats() {
         }
     }
 
-    async function openEditModal(batchId, readOnly = false) {
+    function openEditModal(batchId, readOnly = false) {
         if(!batchId) return;
 
         // Show modal ONCE (do not re-open on every realtime update)
         const modal = document.getElementById('edit-batch-modal');
         if(modal) modal.style.display = 'flex';
-
-        // --- UI helper: detect IDs packed in OTHER batches (based on registos PACKING) ---
-        let __packOtherIndex = {};
-        try {
-            const rs = await db.ref('registos').once('value');
-            const data = rs.val() || {};
-            Object.keys(data).forEach(k => {
-                const r = data[k];
-                if(!r) return;
-                const mode = String(r.mode || '').toUpperCase();
-                if(mode !== 'PACKING') return;
-                const rid = String(r.id || '').trim();
-                if(!rid) return;
-                const batch = String(r.batch || '').trim();
-                const dateClean = r.dateClean || '';
-                const time = r.endTime || r.time || '';
-                const user = r.user || r.User || '';
-                const keydt = (String(dateClean) + ' ' + String(time)).trim();
-                const prev = __packOtherIndex[rid];
-                if(!prev || (keydt && String(prev._keydt || '') < keydt)) {
-                    __packOtherIndex[rid] = { batch, dateClean, time, user, _keydt: keydt };
-                }
-            });
-        } catch(e) {
-            console.warn('[Batch Details] Could not load registos for other-batch badge:', e);
-            __packOtherIndex = {};
-        }
-
 
         // Detach previous modal listener (avoid duplicate callbacks + auto reopening)
         if(__modalBatchRef && __modalBatchCb) {
@@ -1972,22 +1940,11 @@ function loadPerformanceStats() {
 
                 const nameCell = det.name || "N/A";
                 const contentCell = `<small>${det.content || 'N/A'}</small>`;
-                let statusCell = isCancelled
+
+                const statusCell = isCancelled
                     ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span>
                        <div style="font-size:12px; color:#991b1b; margin-top:4px;">${reason ? ('Motivo: ' + reason) : ''}</div>`
                     : (isPack ? '<span style="color:#166534; font-weight:900;">PACKED</span>' : '<span style="color:#92400e; font-weight:900;">PENDING</span>');
-
-                // If pending here but packed elsewhere, show badge (no data mutation)
-                if(!isCancelled && !isPack) {
-                    const other = (__packOtherIndex && __packOtherIndex[String(id).trim()]) ? __packOtherIndex[String(id).trim()] : null;
-                    if(other && other.batch && other.batch !== batchId) {
-                        const dt = ((other.dateClean || '') + ' ' + (other.time || '')).trim();
-                        const who = other.user ? (' · ' + other.user) : '';
-                        statusCell = `<span style="color:#92400e; font-weight:900;">PENDING</span>
-                            <div style="margin-top:6px; display:inline-block; padding:4px 10px; border-radius:8px; background:#1d4ed8; color:white; font-weight:900; font-size:12px;">PACKED OUTRO LOTE: ${other.batch}</div>
-                            <div style="font-size:12px; color:#334155; margin-top:4px;">${dt}${who}</div>`;
-                    }
-                }
 
                 const canCancel = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
                 const actionCell = isCancelled
@@ -2144,10 +2101,11 @@ Missing: ${sample}${more}`);
         for(let c in gr) {
             let col = document.createElement('div'); col.className = 'carrier-column';
             let color = c.includes('CTT')?'var(--color-ctt)':(c.includes('NACEX')?'var(--color-nacex)':'var(--color-correos)');
-            let h = `<div class="carrier-header" style="background:${color}">${c}</div>`;
+            const printedTotal = gr[c].reduce((acc, b) => acc + getRequiredBatchIds(b).length, 0);
+            let h = `<div class="carrier-header" style="background:${color}"><div>${c}</div><div style="font-size:12px; font-weight:900; opacity:0.95; margin-top:4px;">PRINTED: ${printedTotal}</div></div>`;
             gr[c].forEach(b => {
                 const requiredIds = getRequiredBatchIds(b);
-                const tot = requiredIds.length, done = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length;
+                const tot = requiredIds.length, done = requiredIds.filter(id => _isPackedAnyBatch(id, b)).length;
                 const perc = tot > 0 ? Math.round((done / tot) * 100) : 0;
                 h += `<div class="batch-card"><h4>${b.name}</h4><div style="display:flex; justify-content:space-between; font-size:12px; color:#666;"><span>${perc}% Done</span><span>Status: ${b.status}</span></div><div class="progress-container"><div class="progress-bar" style="width:${perc}%"></div></div><div style="display:flex; gap:10px; margin-top:15px;"><button class="btn-small" style="background:var(--accent); flex:1;" onclick="openEditModal('${b.id}', false)">EDIT</button><button class="btn-small btn-delete" onclick="deleteBatch('${b.id}')">DEL</button></div></div>`;
             });
@@ -2297,6 +2255,94 @@ function loadPrepackCardOnce(fD){
     }
 }
 
+
+// ===== PACKED INDEX (GLOBAL) =====
+// Objective: in Overview, consider an ID "packed" even if it was packed in another batch.
+// We build an index from `registos` (mode == PACKING) for the selected day and use it in Overview calculations.
+let _packedIndex = {};        // { [id]: { batch, user, dateClean, time, sortKey } }
+let _packedIndexDate = "";
+let _packedIndexQuery = null;
+let _packedIndexCb = null;
+
+function _buildPackedIndexFromRegistos(all){
+    const idx = {};
+    try{
+        Object.entries(all || {}).forEach(([k, r]) => {
+            if(!r) return;
+            const mode = String(r.mode || "").toUpperCase();
+            if(mode !== "PACKING") return;
+            const id = String(r.id || "").trim();
+            if(!id) return;
+            const dateClean = String(r.dateClean || "").trim();
+            const time = String(r.endTime || r.time || "").trim();
+            const sortKey = dateClean + " " + time;
+            if(!idx[id] || sortKey > idx[id].sortKey){
+                idx[id] = {
+                    batch: String(r.batch || "").trim(),
+                    user: String(r.user || r.email || "").trim(),
+                    dateClean, time, sortKey
+                };
+            }
+        });
+    }catch(e){ console.warn("_buildPackedIndexFromRegistos error", e); }
+    return idx;
+}
+
+function _isPackedAnyBatch(orderId, batchObj){
+    try{
+        if(batchObj && batchObj.processed_ids && batchObj.processed_ids[orderId]) return true;
+        return !!(_packedIndex && _packedIndex[orderId]);
+    }catch(e){ return false; }
+}
+
+function stopPackedIndexListener(){
+    try{
+        if(_packedIndexQuery && _packedIndexCb) _packedIndexQuery.off('value', _packedIndexCb);
+    }catch(e){}
+    _packedIndexQuery = null;
+    _packedIndexCb = null;
+}
+
+function startPackedIndexListener(fD){
+    try{
+        stopPackedIndexListener();
+        _packedIndexDate = fD || "";
+        _packedIndexQuery = db.ref('registos').orderByChild('dateClean').equalTo(_packedIndexDate);
+        _packedIndexCb = (snap) => {
+            const all = snap.val() || {};
+            _packedIndex = _buildPackedIndexFromRegistos(all);
+
+            // refresh overview if open & same date
+            try{
+                const bts = _activeBatchesCache || {};
+                const cur = _selectedOverviewDate();
+                if(_overviewActive() && cur === _packedIndexDate){
+                    updateDashboardStats(bts, cur);
+                    renderManagementUI(bts, cur);
+                }
+            }catch(e){}
+        };
+        _packedIndexQuery.on('value', _packedIndexCb);
+    }catch(e){
+        console.warn("startPackedIndexListener error", e);
+    }
+}
+
+function loadPackedIndexOnce(fD){
+    try{
+        _packedIndexDate = fD || "";
+        return db.ref('registos').orderByChild('dateClean').equalTo(_packedIndexDate).once('value')
+            .then(snap => {
+                _packedIndex = _buildPackedIndexFromRegistos(snap.val() || {});
+            })
+            .catch(e => { console.warn("loadPackedIndexOnce error", e); _packedIndex = {}; });
+    }catch(e){
+        console.warn("loadPackedIndexOnce error", e);
+        _packedIndex = {};
+        return Promise.resolve();
+    }
+}
+
 // ===== Realtime core wiring (avoid duplicate listeners) =====
 let _activeBatchesRef = null;
 let _activeBatchesCb  = null;
@@ -2372,9 +2418,12 @@ function syncGlobalData() {
 
     if(fD === today){
         startPrepackCardListener(fD);
+        startPackedIndexListener(fD);
     }else{
         stopPrepackCardListener();
         loadPrepackCardOnce(fD);
+        stopPackedIndexListener();
+        loadPackedIndexOnce(fD).then(()=>{ try{ const bts=_activeBatchesCache||{}; updateDashboardStats(bts,fD); renderManagementUI(bts,fD);}catch(e){} });
     }
 
     // render immediately from the latest cache we have
@@ -2544,7 +2593,7 @@ function showMetadata(id) {
 
     function updateDashboardStats(all, fD) { 
         let nP = 0, nR = 0, nK = 0; for(let k in all) { let b = all[k]; if(b.dateClean === fD) { const requiredIds = getRequiredBatchIds(b);
-            const nI = requiredIds.length, nE = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
+            const nI = requiredIds.length, nE = requiredIds.filter(id => _isPackedAnyBatch(id, b)).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
         document.getElementById('card-printed').innerText = nP; document.getElementById('card-ready').innerText = nR; document.getElementById('card-packed').innerText = nK; 
     }
     function updateSelects(bts, fD) {
