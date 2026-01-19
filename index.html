@@ -6,7 +6,8 @@
     <title>WH-MURTEDE LOGISTICS - V95 TOTAL CONTROL</title>
     
     <!-- SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script>
 // ===== MASTER DATA UI WIRING =====
 document.addEventListener('DOMContentLoaded', function(){
   var ms = document.getElementById('master-search');
@@ -663,6 +664,10 @@ document.addEventListener('click', (e) => {
         const e = document.getElementById('login-email').value, p = document.getElementById('login-pass').value;
         try { await auth.signInWithEmailAndPassword(e, p); } catch(e) { alert("Invalid credentials."); }
     }
+
+    // Ensure inline onclick=\"handleLogin()\" works
+    window.handleLogin = handleLogin;
+
 
     function setupUI(email) {
         document.getElementById('login-screen').style.display = 'none';
@@ -1885,12 +1890,40 @@ function loadPerformanceStats() {
         }
     }
 
-    function openEditModal(batchId, readOnly = false) {
+    async function openEditModal(batchId, readOnly = false) {
         if(!batchId) return;
 
         // Show modal ONCE (do not re-open on every realtime update)
         const modal = document.getElementById('edit-batch-modal');
         if(modal) modal.style.display = 'flex';
+
+        // --- UI helper: detect IDs packed in OTHER batches (based on registos PACKING) ---
+        let __packOtherIndex = {};
+        try {
+            const rs = await db.ref('registos').once('value');
+            const data = rs.val() || {};
+            Object.keys(data).forEach(k => {
+                const r = data[k];
+                if(!r) return;
+                const mode = String(r.mode || '').toUpperCase();
+                if(mode !== 'PACKING') return;
+                const rid = String(r.id || '').trim();
+                if(!rid) return;
+                const batch = String(r.batch || '').trim();
+                const dateClean = r.dateClean || '';
+                const time = r.endTime || r.time || '';
+                const user = r.user || r.User || '';
+                const keydt = (String(dateClean) + ' ' + String(time)).trim();
+                const prev = __packOtherIndex[rid];
+                if(!prev || (keydt && String(prev._keydt || '') < keydt)) {
+                    __packOtherIndex[rid] = { batch, dateClean, time, user, _keydt: keydt };
+                }
+            });
+        } catch(e) {
+            console.warn('[Batch Details] Could not load registos for other-batch badge:', e);
+            __packOtherIndex = {};
+        }
+
 
         // Detach previous modal listener (avoid duplicate callbacks + auto reopening)
         if(__modalBatchRef && __modalBatchCb) {
@@ -1939,11 +1972,22 @@ function loadPerformanceStats() {
 
                 const nameCell = det.name || "N/A";
                 const contentCell = `<small>${det.content || 'N/A'}</small>`;
-
-                const statusCell = isCancelled
+                let statusCell = isCancelled
                     ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span>
                        <div style="font-size:12px; color:#991b1b; margin-top:4px;">${reason ? ('Motivo: ' + reason) : ''}</div>`
                     : (isPack ? '<span style="color:#166534; font-weight:900;">PACKED</span>' : '<span style="color:#92400e; font-weight:900;">PENDING</span>');
+
+                // If pending here but packed elsewhere, show badge (no data mutation)
+                if(!isCancelled && !isPack) {
+                    const other = (__packOtherIndex && __packOtherIndex[String(id).trim()]) ? __packOtherIndex[String(id).trim()] : null;
+                    if(other && other.batch && other.batch !== batchId) {
+                        const dt = ((other.dateClean || '') + ' ' + (other.time || '')).trim();
+                        const who = other.user ? (' · ' + other.user) : '';
+                        statusCell = `<span style="color:#92400e; font-weight:900;">PENDING</span>
+                            <div style="margin-top:6px; display:inline-block; padding:4px 10px; border-radius:8px; background:#1d4ed8; color:white; font-weight:900; font-size:12px;">PACKED OUTRO LOTE: ${other.batch}</div>
+                            <div style="font-size:12px; color:#334155; margin-top:4px;">${dt}${who}</div>`;
+                    }
+                }
 
                 const canCancel = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
                 const actionCell = isCancelled
