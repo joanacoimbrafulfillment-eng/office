@@ -2114,19 +2114,63 @@ Missing: ${sample}${more}`);
     function finishPicking() { const bId = document.getElementById('pick-batch-select').value; if(!bId) return; db.ref('active_batches/'+bId).update({status: 'READY_TO_PACK'}).then(() => location.reload()); }
 
     function renderManagementUI(all, fD) {
-        const container = document.getElementById('mgmt-container'); container.innerHTML = "";
-        let gr = {}; for(let k in all) { let b = all[k]; if(b.dateClean === fD) { if(!gr[b.carrier]) gr[b.carrier] = []; gr[b.carrier].push({ ...b, id: k }); } }
-        for(let c in gr) {
-            let col = document.createElement('div'); col.className = 'carrier-column';
-            let color = c.includes('CTT')?'var(--color-ctt)':(c.includes('NACEX')?'var(--color-nacex)':'var(--color-correos)');
-            let h = `<div class="carrier-header" style="background:${color}">${c}</div>`;
+        const container = document.getElementById('mgmt-container');
+        container.innerHTML = "";
+
+        // Group batches by carrier for the selected day
+        let gr = {};
+        for (let k in all) {
+            let b = all[k];
+            if (b && b.dateClean === fD) {
+                if (!gr[b.carrier]) gr[b.carrier] = [];
+                gr[b.carrier].push({ ...b, id: k });
+            }
+        }
+
+        // NEW: compute per-carrier TOTAL (unique IDs), DONE and PENDING (for the header)
+        const carrierAgg = {};
+        Object.keys(gr).forEach(c => {
+            const allIds = new Set();
+            const doneIds = new Set();
             gr[c].forEach(b => {
                 const requiredIds = getRequiredBatchIds(b);
-                const tot = requiredIds.length, done = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length;
+                requiredIds.forEach(id => {
+                    allIds.add(id);
+                    if (b.processed_ids && b.processed_ids[id]) doneIds.add(id);
+                });
+            });
+            carrierAgg[c] = { tot: allIds.size, done: doneIds.size };
+        });
+
+        for (let c in gr) {
+            let col = document.createElement('div');
+            col.className = 'carrier-column';
+
+            let color = c.includes('CTT') ? 'var(--color-ctt)' : (c.includes('NACEX') ? 'var(--color-nacex)' : 'var(--color-correos)');
+
+            const agg = carrierAgg[c] || { tot: 0, done: 0 };
+            const pend = Math.max(0, agg.tot - agg.done);
+
+            // Header now shows totals per carrier
+            let h = `
+                <div class="carrier-header" style="background:${color}">
+                    <div style="font-weight:900; font-size:16px; line-height:1;">${c}</div>
+                    <div style="font-size:12px; font-weight:800; opacity:.95; margin-top:6px;">
+                        TOTAL: ${agg.tot} &nbsp;|&nbsp; DONE: ${agg.done} &nbsp;|&nbsp; PEND: ${pend}
+                    </div>
+                </div>`;
+
+            gr[c].forEach(b => {
+                const requiredIds = getRequiredBatchIds(b);
+                const tot = requiredIds.length;
+                const done = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length;
                 const perc = tot > 0 ? Math.round((done / tot) * 100) : 0;
+
                 h += `<div class="batch-card"><h4>${b.name}</h4><div style="display:flex; justify-content:space-between; font-size:12px; color:#666;"><span>${perc}% Done</span><span>Status: ${b.status}</span></div><div class="progress-container"><div class="progress-bar" style="width:${perc}%"></div></div><div style="display:flex; gap:10px; margin-top:15px;"><button class="btn-small" style="background:var(--accent); flex:1;" onclick="openEditModal('${b.id}', false)">EDIT</button><button class="btn-small btn-delete" onclick="deleteBatch('${b.id}')">DEL</button></div></div>`;
             });
-            col.innerHTML = h; container.appendChild(col);
+
+            col.innerHTML = h;
+            container.appendChild(col);
         }
     }
 
