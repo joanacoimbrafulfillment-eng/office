@@ -6,8 +6,7 @@
     <title>WH-MURTEDE LOGISTICS - V95 TOTAL CONTROL</title>
     
     <!-- SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js">
 // ===== MASTER DATA UI WIRING =====
 document.addEventListener('DOMContentLoaded', function(){
   var ms = document.getElementById('master-search');
@@ -82,31 +81,13 @@ window.exportMasterDB = exportMasterDB;
         .dash-card h2 { font-size: 48px; margin: 0; color: var(--primary); }
         .dash-card p { margin: 10px 0 0; font-weight: 900; text-transform: uppercase; font-size: 14px; color: #7f8c8d; }
 
-        /* KANBAN OVERVIEW (fit PC screen without horizontal scrolling) */
-        .mgmt-wrapper {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 20px;
-            overflow-x: hidden;
-            padding-bottom: 30px;
-            align-items: start;
-        }
-        .carrier-column {
-            min-width: 0;
-            max-width: none;
-            width: 100%;
-            background: rgba(0,0,0,0.03);
-            border-radius: 20px;
-            padding: 15px;
-        }
+        /* KANBAN OVERVIEW */
+        .mgmt-wrapper { display: flex; gap: 30px; overflow-x: auto; padding-bottom: 30px; align-items: flex-start; }
+        .carrier-column { min-width: 380px; max-width: 380px; flex-shrink: 0; background: rgba(0,0,0,0.03); border-radius: 20px; padding: 15px; }
         .carrier-header { border-radius: 12px; color: white; padding: 15px; font-weight: 900; font-size: 18px; text-align: center; margin-bottom: 15px; text-transform: uppercase; }
         .batch-card { background: white; border-radius: 15px; padding: 20px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
         .progress-container { background: #eee; border-radius: 10px; height: 8px; margin: 12px 0; overflow: hidden; }
         .progress-bar { background: var(--packing); height: 100%; transition: width 0.5s; }
-
-        @media (max-width: 1400px) {
-            .mgmt-wrapper { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-        }
 
         /* BUTTONS */
         .btn-mobile-op { width: 100%; padding: 20px; font-size: 18px; font-weight: 900; border: none; border-radius: 12px; cursor: pointer; color: white; text-transform: uppercase; transition: 0.2s; margin-bottom: 10px; }
@@ -154,6 +135,20 @@ window.exportMasterDB = exportMasterDB;
             <button class="btn-small btn-delete" id="modal-delete-btn" style="padding:15px 30px; font-size:16px;">DELETE ENTIRE BATCH</button>
         </div>
         <hr style="margin:25px 0;">
+
+        <!-- CARRIER EDIT (ADMIN) -->
+        <div id="modal-carrier-row" style="display:none; margin: 10px 0 20px 0; padding: 14px 16px; border: 1px solid #e5e7eb; border-radius: 14px; background: #f8fafc;">
+            <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:220px;">
+                    <label style="font-weight:900; font-size:12px; color:#475569;">🚚 Transportadora do Lote</label>
+                    <select id="modal-carrier-select" style="height:52px;"></select>
+                    <div style="font-size:12px; color:#64748b; margin-top:6px;">Mudar aqui altera a coluna do OVERVIEW e o carrier nos exports (para este lote).</div>
+                </div>
+                <button id="modal-carrier-save" class="btn-small" style="background: var(--accent); padding: 14px 18px; font-size: 14px; height:52px;" onclick="saveBatchCarrierFromModal()">GUARDAR</button>
+                <div id="modal-carrier-status" style="display:none; font-size:12px; color:#0f766e; font-weight:900;"></div>
+            </div>
+        </div>
+
         <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:30px;">
             <div>
                 <h4>📦 Inventory Status</h4>
@@ -635,10 +630,6 @@ window.exportMasterDB = exportMasterDB;
     let currentUser = null, scanData = { id: "", track: "", prods: [], startTime: "", endTime: "" };
     let isAdminUser = false;
     let masterProductsDB = {}, currentMode = "PACKING", activeBatchData = null, activeBatchPath = null;
-
-    // --- PERF: keep only one modal listener at a time (prevents modal reopening itself) ---
-    let __modalBatchRef = null;
-    let __modalBatchCb = null;
 
     function safeKey(str) { if(!str) return "UNKNOWN"; return str.toString().replace(/[.#$/[\]]/g, "_").trim().toUpperCase(); }
 
@@ -1806,43 +1797,92 @@ function loadPerformanceStats() {
         });
     }
 
-    function logBatchAction(bId, msg) {
+    
+
+    // ================================
+    // 🚚 BATCH CARRIER EDIT (inside Batch Details modal)
+    // ================================
+    let __modalBatchId_forCarrier = null;
+    let _carriersList = [];
+
+    function _setModalCarrierStatus(msg, ok=true){
+        const el = document.getElementById('modal-carrier-status');
+        if(!el) return;
+        el.style.display = msg ? 'block' : 'none';
+        el.style.color = ok ? '#0f766e' : '#b91c1c';
+        el.textContent = msg || '';
+    }
+
+    function renderBatchCarrierControls(batchId, batchObj, readOnly){
+        try{
+            __modalBatchId_forCarrier = batchId || null;
+            const row = document.getElementById('modal-carrier-row');
+            const sel = document.getElementById('modal-carrier-select');
+            const btn = document.getElementById('modal-carrier-save');
+            if(!row || !sel || !btn) return;
+
+            // only admins can change carrier
+            const canEdit = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
+
+            // show row for admins (edit) and also for readOnly? keep hidden for non-admin to avoid confusion
+            row.style.display = (canEdit) ? 'block' : 'none';
+            if(!canEdit) return;
+
+            // build options from config; fallback defaults
+            const list = (Array.isArray(_carriersList) && _carriersList.length) ? _carriersList : ['CTT','NACEX','CORREOS'];
+            const current = (batchObj && batchObj.carrier) ? String(batchObj.carrier) : '';
+
+            sel.innerHTML = '';
+            list.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c;
+                opt.textContent = c;
+                sel.appendChild(opt);
+            });
+            if(current && list.includes(current)) sel.value = current;
+            else if(list.length) sel.value = list[0];
+
+            _setModalCarrierStatus('');
+        }catch(e){
+            console.warn('renderBatchCarrierControls error', e);
+        }
+    }
+
+    async function saveBatchCarrierFromModal(){
+        try{
+            const batchId = __modalBatchId_forCarrier;
+            const sel = document.getElementById('modal-carrier-select');
+            if(!batchId || !sel) return;
+
+            if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+                return alert('Sem permissões para editar transportadora.');
+            }
+
+            const newCarrier = String(sel.value || '').trim();
+            if(!newCarrier) return alert('Transportadora inválida.');
+
+            // read current to avoid useless writes
+            const snap = await db.ref('active_batches/' + batchId + '/carrier').once('value');
+            const prev = snap.val() || '';
+            if(String(prev) === String(newCarrier)){
+                _setModalCarrierStatus('Sem alterações (já estava ' + newCarrier + ').', true)
+                return;
+            }
+
+            await db.ref('active_batches/' + batchId + '/carrier').set(newCarrier);
+            logBatchAction(batchId, 'CARRIER UPDATE: ' + (prev || 'N/A') + ' -> ' + newCarrier);
+            _setModalCarrierStatus('✅ Guardado: ' + newCarrier);
+        }catch(e){
+            console.error(e);
+            _setModalCarrierStatus('Erro ao guardar.', false);
+            alert('Erro ao guardar transportadora.');
+        }
+    }
+
+function logBatchAction(bId, msg) {
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
         db.ref(`active_batches/${bId}/history`).push({ time: _nowDateTime(), user: uname, msg });
     }
-
-    // --- INVENTORY MODIFICATION HELPERS (logs qty changes + deletions) ---
-    async function updateInvQty(batchId, sku, newVal){
-        try{
-            const newQ = parseInt(newVal, 10);
-            if(isNaN(newQ) || newQ < 0) return alert("Qtd inválida.");
-            const qRef = db.ref(`active_batches/${batchId}/inventory/${sku}/q`);
-            const prevSnap = await qRef.once('value');
-            const oldQ = prevSnap.val();
-            if(oldQ === newQ) return; // no change
-
-            await qRef.set(newQ);
-            logBatchAction(batchId, `INV QTY ${sku}: ${oldQ} -> ${newQ}`);
-        }catch(e){
-            console.error(e);
-            alert("Erro ao atualizar quantidade.");
-        }
-    }
-
-    async function deleteInvSku(batchId, sku){
-        try{
-            if(!confirm(`Remover produto "${sku}" do lote?`)) return;
-            const itemRef = db.ref(`active_batches/${batchId}/inventory/${sku}`);
-            const prevSnap = await itemRef.once('value');
-            const old = prevSnap.val() || {};
-            await itemRef.remove();
-            logBatchAction(batchId, `INV DEL ${sku} (q=${old.q || 0}, pos=${old.pos || ""})`);
-        }catch(e){
-            console.error(e);
-            alert("Erro ao remover produto.");
-        }
-    }
-
 
 
 
@@ -1904,64 +1944,46 @@ function loadPerformanceStats() {
         }
     }
 
+
     function openEditModal(batchId, readOnly = false) {
         if(!batchId) return;
-
-        // Show modal ONCE (do not re-open on every realtime update)
-        const modal = document.getElementById('edit-batch-modal');
-        if(modal) modal.style.display = 'flex';
-
-        // Detach previous modal listener (avoid duplicate callbacks + auto reopening)
-        if(__modalBatchRef && __modalBatchCb) {
-            __modalBatchRef.off('value', __modalBatchCb);
-        }
-
-        __modalBatchRef = db.ref('active_batches/' + batchId);
-        __modalBatchCb = (snap) => {
-            const b = snap.val();
-            if(!b) return;
-
+        db.ref('active_batches/'+batchId).on('value', snap => {
+            const b = snap.val(); if(!b) return;
             document.getElementById('edit-batch-title').innerText = b.name;
-            document.getElementById('modal-delete-btn').style.display =
-                (readOnly || !currentUser.email.endsWith('@admin.com')) ? 'none' : 'block';
-
-            const tbody = document.querySelector('#edit-inventory-table tbody');
-            tbody.innerHTML = "";
+            document.getElementById('modal-delete-btn').style.display = (readOnly || !currentUser.email.endsWith('@admin.com')) ? 'none' : 'block';
+            // Carrier controls inside modal (admin)
+            try{ renderBatchCarrierControls(batchId, b, readOnly); }catch(e){}
+            const tbody = document.querySelector('#edit-inventory-table tbody'); tbody.innerHTML = "";
             Object.keys(b.inventory || {}).sort().forEach(k => {
                 const it = b.inventory[k];
-                tbody.innerHTML += `<tr>
-                    <td>${k}</td>
-                    <td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInvQty('${batchId}','${k}', this.value)">`}</td>
-                    <td>${it.pos}</td>
-                    ${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="deleteInvSku('${batchId}','${k}')">X</button></td>`}
-                </tr>`;
+                tbody.innerHTML += `<tr><td>${k}</td><td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInventoryQty('${batchId}', '${k}', ${it.q}, this.value)">`}</td><td>${it.pos}</td>${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="removeInventoryItem('${batchId}', '${k}', ${it.q})">X</button></td>`}</tr>`;
             });
-
             const idsList = document.getElementById('edit-ids-list');
             let html = '<table><thead><tr><th>ID</th><th>Cliente</th><th>Content</th><th>Status</th><th>Ação</th></tr></thead><tbody>';
-
-            (b.expected_ids || []).forEach(id => {
+            (b.expected_ids||[]).forEach(id => {
                 const isPack = (b.processed_ids && b.processed_ids[id]);
                 const isCancelled = (b.cancelled_ids && b.cancelled_ids[id]);
-                const det = (b.order_details || {})[id] || {name:"N/A"};
+                const det = (b.order_details||{})[id] || {name:"N/A", content:"N/A"};
                 const cancelInfo = isCancelled ? b.cancelled_ids[id] : null;
+
+                const idCell = isCancelled
+                    ? `<span style="color:#b91c1c; text-decoration:line-through; font-weight:900;">${id}</span>`
+                    : `<b>${id}</b>`;
+
+                const nameCell = isCancelled
+                    ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.name || 'N/A'}</span>`
+                    : `${det.name || 'N/A'}`;
+
+                const contentCell = isCancelled
+                    ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.content || 'N/A'}</span>`
+                    : `${det.content || 'N/A'}`;
 
                 let statusTxt = 'PENDING';
                 if (isPack) statusTxt = 'PACKED';
                 if (isCancelled) statusTxt = 'CANCELADO';
 
-                const reason = (cancelInfo && cancelInfo.reason) ? cancelInfo.reason : "";
-
-                const idCell = isCancelled
-                    ? `<b style="color:#b91c1c;" title="${reason ? ('CANCELADO: ' + reason) : ''}">${id}</b>`
-                    : `<b>${id}</b>`;
-
-                const nameCell = det.name || "N/A";
-                const contentCell = `<small>${det.content || 'N/A'}</small>`;
-
                 const statusCell = isCancelled
-                    ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span>
-                       <div style="font-size:12px; color:#991b1b; margin-top:4px;">${reason ? ('Motivo: ' + reason) : ''}</div>`
+                    ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span><div style="font-size:12px; color:#991b1b; margin-top:4px;">${(cancelInfo && cancelInfo.reason) ? ('Motivo: ' + cancelInfo.reason) : ''}</div>`
                     : (isPack ? '<span style="color:#166534; font-weight:900;">PACKED</span>' : '<span style="color:#92400e; font-weight:900;">PENDING</span>');
 
                 const canCancel = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
@@ -1970,38 +1992,16 @@ function loadPerformanceStats() {
                     : (canCancel
                         ? `${isPack ? `<button class="btn-small" style="background:#0ea5e9; margin-right:8px;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
                         : '-');
-
-                html += `<tr>
-                    <td>${idCell}</td>
-                    <td>${nameCell}</td>
-                    <td>${contentCell}</td>
-                    <td>${statusCell}</td>
-                    <td>${actionCell}</td>
-                </tr>`;
+                html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
             });
-
             idsList.innerHTML = html + '</tbody></table>';
-
-            const logBox = document.getElementById('qty-modification-log');
-            logBox.innerHTML = "";
-            if(b.history) {
-                Object.values(b.history).reverse().forEach(log => {
-                    logBox.innerHTML += `<div style="border-bottom:1px solid #eee; padding:4px;"><b>[${log.time}] ${log.user}:</b> ${log.msg}</div>`;
-                });
-            }
-
-            const cancelBox = document.getElementById('cancelled-ids-log');
-            cancelBox.innerHTML = "";
-            if(b.cancelled_ids) {
-                Object.values(b.cancelled_ids).reverse().forEach(c => {
-                    cancelBox.innerHTML += `<div><b>ID ${c.id}:</b> ${c.reason} <br><small>By ${c.user} at ${c.time}</small></div>`;
-                });
-            }
-        };
-
-        __modalBatchRef.on('value', __modalBatchCb);
+            const logBox = document.getElementById('qty-modification-log'); logBox.innerHTML = "";
+            if(b.history) { Object.values(b.history).reverse().forEach(log => { logBox.innerHTML += `<div style="border-bottom:1px solid #eee; padding:4px;"><b>[${log.time}] ${log.user}:</b> ${log.msg}</div>`; }); }
+            const cancelBox = document.getElementById('cancelled-ids-log'); cancelBox.innerHTML = "";
+            if(b.cancelled_ids) { Object.values(b.cancelled_ids).reverse().forEach(c => { cancelBox.innerHTML += `<div><b>ID ${c.id}:</b> ${c.reason} <br><small>By ${c.user} at ${c.time}</small></div>`; }); }
+            document.getElementById('edit-batch-modal').style.display = 'flex';
+        });
     }
-
 
     function loadBatchData(bId) {
         if(!bId) return; 
@@ -2119,11 +2119,10 @@ Missing: ${sample}${more}`);
         for(let c in gr) {
             let col = document.createElement('div'); col.className = 'carrier-column';
             let color = c.includes('CTT')?'var(--color-ctt)':(c.includes('NACEX')?'var(--color-nacex)':'var(--color-correos)');
-            const printedTotal = gr[c].reduce((acc, b) => acc + getRequiredBatchIds(b).length, 0);
-            let h = `<div class="carrier-header" style="background:${color}"><div>${c}</div><div style="font-size:12px; font-weight:900; opacity:0.95; margin-top:4px;">PRINTED: ${printedTotal}</div></div>`;
+            let h = `<div class="carrier-header" style="background:${color}">${c}</div>`;
             gr[c].forEach(b => {
                 const requiredIds = getRequiredBatchIds(b);
-                const tot = requiredIds.length, done = requiredIds.filter(id => _isPackedAnyBatch(id, b)).length;
+                const tot = requiredIds.length, done = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length;
                 const perc = tot > 0 ? Math.round((done / tot) * 100) : 0;
                 h += `<div class="batch-card"><h4>${b.name}</h4><div style="display:flex; justify-content:space-between; font-size:12px; color:#666;"><span>${perc}% Done</span><span>Status: ${b.status}</span></div><div class="progress-container"><div class="progress-bar" style="width:${perc}%"></div></div><div style="display:flex; gap:10px; margin-top:15px;"><button class="btn-small" style="background:var(--accent); flex:1;" onclick="openEditModal('${b.id}', false)">EDIT</button><button class="btn-small btn-delete" onclick="deleteBatch('${b.id}')">DEL</button></div></div>`;
             });
@@ -2273,94 +2272,6 @@ function loadPrepackCardOnce(fD){
     }
 }
 
-
-// ===== PACKED INDEX (GLOBAL) =====
-// Objective: in Overview, consider an ID "packed" even if it was packed in another batch.
-// We build an index from `registos` (mode == PACKING) for the selected day and use it in Overview calculations.
-let _packedIndex = {};        // { [id]: { batch, user, dateClean, time, sortKey } }
-let _packedIndexDate = "";
-let _packedIndexQuery = null;
-let _packedIndexCb = null;
-
-function _buildPackedIndexFromRegistos(all){
-    const idx = {};
-    try{
-        Object.entries(all || {}).forEach(([k, r]) => {
-            if(!r) return;
-            const mode = String(r.mode || "").toUpperCase();
-            if(mode !== "PACKING") return;
-            const id = String(r.id || "").trim();
-            if(!id) return;
-            const dateClean = String(r.dateClean || "").trim();
-            const time = String(r.endTime || r.time || "").trim();
-            const sortKey = dateClean + " " + time;
-            if(!idx[id] || sortKey > idx[id].sortKey){
-                idx[id] = {
-                    batch: String(r.batch || "").trim(),
-                    user: String(r.user || r.email || "").trim(),
-                    dateClean, time, sortKey
-                };
-            }
-        });
-    }catch(e){ console.warn("_buildPackedIndexFromRegistos error", e); }
-    return idx;
-}
-
-function _isPackedAnyBatch(orderId, batchObj){
-    try{
-        if(batchObj && batchObj.processed_ids && batchObj.processed_ids[orderId]) return true;
-        return !!(_packedIndex && _packedIndex[orderId]);
-    }catch(e){ return false; }
-}
-
-function stopPackedIndexListener(){
-    try{
-        if(_packedIndexQuery && _packedIndexCb) _packedIndexQuery.off('value', _packedIndexCb);
-    }catch(e){}
-    _packedIndexQuery = null;
-    _packedIndexCb = null;
-}
-
-function startPackedIndexListener(fD){
-    try{
-        stopPackedIndexListener();
-        _packedIndexDate = fD || "";
-        _packedIndexQuery = db.ref('registos').orderByChild('dateClean').equalTo(_packedIndexDate);
-        _packedIndexCb = (snap) => {
-            const all = snap.val() || {};
-            _packedIndex = _buildPackedIndexFromRegistos(all);
-
-            // refresh overview if open & same date
-            try{
-                const bts = _activeBatchesCache || {};
-                const cur = _selectedOverviewDate();
-                if(_overviewActive() && cur === _packedIndexDate){
-                    updateDashboardStats(bts, cur);
-                    renderManagementUI(bts, cur);
-                }
-            }catch(e){}
-        };
-        _packedIndexQuery.on('value', _packedIndexCb);
-    }catch(e){
-        console.warn("startPackedIndexListener error", e);
-    }
-}
-
-function loadPackedIndexOnce(fD){
-    try{
-        _packedIndexDate = fD || "";
-        return db.ref('registos').orderByChild('dateClean').equalTo(_packedIndexDate).once('value')
-            .then(snap => {
-                _packedIndex = _buildPackedIndexFromRegistos(snap.val() || {});
-            })
-            .catch(e => { console.warn("loadPackedIndexOnce error", e); _packedIndex = {}; });
-    }catch(e){
-        console.warn("loadPackedIndexOnce error", e);
-        _packedIndex = {};
-        return Promise.resolve();
-    }
-}
-
 // ===== Realtime core wiring (avoid duplicate listeners) =====
 let _activeBatchesRef = null;
 let _activeBatchesCb  = null;
@@ -2411,15 +2322,44 @@ function initRealtimeCore(){
 
         db.ref('config/carriers').on('value', s => {
             const carriers = s.val() || ["CTT", "NACEX", "CORREOS"];
+
+            // keep a normalized global list for other UIs (ex: Batch Details modal)
+            try{
+                _carriersList = (Array.isArray(carriers) ? carriers : Object.values(carriers))
+                    .map(c => String(c).trim().toUpperCase())
+                    .filter(Boolean);
+                _carriersList = Array.from(new Set(_carriersList)).sort();
+            }catch(e){ _carriersList = []; }
+
+            const list = (_carriersList && _carriersList.length) ? _carriersList : ["CTT", "NACEX", "CORREOS"];
+
             const sel = document.getElementById('off-carrier-select');
             if(sel){
                 sel.innerHTML = "";
-                (Array.isArray(carriers) ? carriers : Object.values(carriers)).forEach(c => {
+                list.forEach(c => {
                     sel.innerHTML += `<option value="${c}">${c}</option>`;
                 });
             }
+
             // also render admin list in OFFICE (if present)
-            try { renderCarrierAdminList(Array.isArray(carriers) ? carriers : Object.values(carriers)); } catch(e) {}
+            try { renderCarrierAdminList(list); } catch(e) {}
+
+            // if the Batch Details modal is open, refresh options (keep selection)
+            try{
+                if(__modalBatchId_forCarrier && document.getElementById('edit-batch-modal') && document.getElementById('edit-batch-modal').style.display === 'flex'){
+                    const cur = document.getElementById('modal-carrier-select') ? document.getElementById('modal-carrier-select').value : '';
+                    const s2 = document.getElementById('modal-carrier-select');
+                    if(s2){
+                        s2.innerHTML = '';
+                        list.forEach(c => {
+                            const opt = document.createElement('option');
+                            opt.value = c; opt.textContent = c;
+                            s2.appendChild(opt);
+                        });
+                        if(cur && list.includes(cur)) s2.value = cur;
+                    }
+                }
+            }catch(e){}
         });
     }
 }
@@ -2436,12 +2376,9 @@ function syncGlobalData() {
 
     if(fD === today){
         startPrepackCardListener(fD);
-        startPackedIndexListener(fD);
     }else{
         stopPrepackCardListener();
         loadPrepackCardOnce(fD);
-        stopPackedIndexListener();
-        loadPackedIndexOnce(fD).then(()=>{ try{ const bts=_activeBatchesCache||{}; updateDashboardStats(bts,fD); renderManagementUI(bts,fD);}catch(e){} });
     }
 
     // render immediately from the latest cache we have
@@ -2597,21 +2534,11 @@ function showMetadata(id) {
         alert("Correção gravada (ID mantém-se PACKED).");
     }
 
-    function closeModal(id) {
-        const el = document.getElementById(id);
-        if(el) el.style.display = 'none';
 
-        // If closing batch details modal, detach its realtime listener
-        if(id === 'edit-batch-modal' && __modalBatchRef && __modalBatchCb) {
-            __modalBatchRef.off('value', __modalBatchCb);
-            __modalBatchRef = null;
-            __modalBatchCb = null;
-        }
-    }
-
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
     function updateDashboardStats(all, fD) { 
         let nP = 0, nR = 0, nK = 0; for(let k in all) { let b = all[k]; if(b.dateClean === fD) { const requiredIds = getRequiredBatchIds(b);
-            const nI = requiredIds.length, nE = requiredIds.filter(id => _isPackedAnyBatch(id, b)).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
+            const nI = requiredIds.length, nE = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
         document.getElementById('card-printed').innerText = nP; document.getElementById('card-ready').innerText = nR; document.getElementById('card-packed').innerText = nK; 
     }
     function updateSelects(bts, fD) {
