@@ -627,7 +627,7 @@ window.exportMasterDB = exportMasterDB;
     const auth = firebase.auth(), db = firebase.database();
 
     // scanData now includes startTime and endTime
-    let currentUser = null, scanData = { id: "", track: "", prods: [], startTime: "", endTime: "" };
+    let currentUser = null, scanData = { id: "", track: "", prods: [], startTime: "", endTime: "", startTs: null, endTs: null };
     let isAdminUser = false;
     let masterProductsDB = {}, currentMode = "PACKING", activeBatchData = null, activeBatchPath = null;
 
@@ -1101,7 +1101,7 @@ function handleScan(v, mode) {
             const prodName = masterProductsDB[key]; scanData.prods.push(prodName);
         } else if(/^\d{8}$/.test(v)) {
             // RECORD START TIME ON FIRST SCAN OF ID
-            if(!scanData.id) scanData.startTime = _nowTime();
+            if(!scanData.id){ scanData.startTime = _nowTime(); scanData.startTs = Date.now(); }
             scanData.id = v; if(m === 'PACKING') showMetadata(v); 
         } else {
             scanData.track = v;
@@ -1121,6 +1121,7 @@ function handleScan(v, mode) {
         if(!scanData.id || !scanData.track) return alert("Faltam dados!");
 
         const endTime = _nowTime();
+        const endTs = Date.now();
 
         try {
             if(m === 'PACKING' && bId) {
@@ -1134,10 +1135,12 @@ function handleScan(v, mode) {
                 mode: m, 
                 batch: bId || "GENERAL", 
                 user: currentUser.email.split('@')[0].toUpperCase(), 
-                startTime: scanData.startTime || endTime,
+                startTime: scanData.startTime || "",
                 endTime: endTime,
+                startTs: (typeof scanData.startTs === 'number') ? scanData.startTs : null,
+                endTs: endTs,
                 time: endTime, // Main sorting time
-                dateClean: new Date().toISOString().split('T')[0] 
+                dateClean: new Date().toISOString().split('T')[0]
             });
 
             // NEW: write to persistent ID history so SEARCH can show all events even across batch recreations
@@ -1166,7 +1169,7 @@ function handleScan(v, mode) {
     }
 
     function resetScan() {
-        scanData = {id:"", track:"", prods:[], startTime: "", endTime: ""}; 
+        scanData = {id:"", track:"", prods:[], startTime: "", endTime: "", startTs: null, endTs: null}; 
         const labels = ['v-id', 'v-track', 'meta-cust-name', 'meta-inv-content', 'rv-id', 'rv-track'];
         labels.forEach(id => { const el = document.getElementById(id); if(el) el.innerText = "-"; });
         const containers = ['v-prods', 'rv-prods'];
@@ -2528,6 +2531,7 @@ function showMetadata(id) {
         if(!packedEditState) return;
 
         const endTime = _nowTime();
+        const endTs = Date.now();
         const dc = _nowDateClean ? _nowDateClean() : new Date().toISOString().split('T')[0];
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
 
@@ -2542,8 +2546,10 @@ function showMetadata(id) {
             mode: "PACKING",
             batch: packedEditState.batchKey,
             user: uname,
-            startTime: packedEditState.source.startTime || endTime,
+            startTime: packedEditState.source.startTime || "",
             endTime: endTime,
+            startTs: (packedEditState.source && typeof packedEditState.source.startTs === 'number') ? packedEditState.source.startTs : null,
+            endTs: endTs,
             time: endTime,
             dateClean: dc,
 
