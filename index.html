@@ -1974,9 +1974,27 @@ function logBatchAction(bId, msg) {
     }
 
 
-    function openEditModal(batchId, readOnly = false) {
+    
+// ===== Batch Details modal listener (avoid reopening / leaks) =====
+let __editBatchRef = null;
+let __editBatchCb = null;
+
+function stopEditBatchListener(){
+  try{
+    if(__editBatchRef && __editBatchCb) __editBatchRef.off('value', __editBatchCb);
+  }catch(e){}
+  __editBatchRef = null;
+  __editBatchCb = null;
+}
+
+function openEditModal(batchId, readOnly = false) {
         if(!batchId) return;
-        db.ref('active_batches/'+batchId).on('value', snap => {
+
+        // stop previous listener so it can't reopen later
+        stopEditBatchListener();
+
+        __editBatchRef = db.ref('active_batches/'+batchId);
+        __editBatchCb = function(snap){
             const b = snap.val(); if(!b) return;
             document.getElementById('edit-batch-title').innerText = b.name;
 
@@ -2049,8 +2067,11 @@ if(metaEl){
             if(b.history) { Object.values(b.history).reverse().forEach(log => { logBox.innerHTML += `<div style="border-bottom:1px solid #eee; padding:4px;"><b>[${log.time}] ${log.user}:</b> ${log.msg}</div>`; }); }
             const cancelBox = document.getElementById('cancelled-ids-log'); cancelBox.innerHTML = "";
             if(b.cancelled_ids) { Object.values(b.cancelled_ids).reverse().forEach(c => { cancelBox.innerHTML += `<div><b>ID ${c.id}:</b> ${c.reason} <br><small>By ${c.user} at ${c.time}</small></div>`; }); }
-            document.getElementById('edit-batch-modal').style.display = 'flex';
-        });
+                    };
+        __editBatchRef.on('value', __editBatchCb);
+
+        // open ONCE (user-driven), not on every realtime update
+        document.getElementById('edit-batch-modal').style.display = 'flex';
     }
 
     function loadBatchData(bId) {
@@ -2683,7 +2704,10 @@ function showMetadata(id) {
     }
 
 
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+function closeModal(id) {
+  document.getElementById(id).style.display = 'none';
+  if(id === 'edit-batch-modal') stopEditBatchListener();
+}
     function updateDashboardStats(all, fD) { 
         let nP = 0, nR = 0, nK = 0; for(let k in all) { let b = all[k]; if(b.dateClean === fD) { const requiredIds = getRequiredBatchIds(b);
             const nI = requiredIds.length, nE = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
