@@ -1979,6 +1979,8 @@ function logBatchAction(bId, msg) {
 let __editBatchRef = null;
 let __editBatchCb = null;
 
+let __editBatchId = null;
+
 function stopEditBatchListener(){
   try{
     if(__editBatchRef && __editBatchCb) __editBatchRef.off('value', __editBatchCb);
@@ -1989,7 +1991,7 @@ function stopEditBatchListener(){
 
 function openEditModal(batchId, readOnly = false) {
         if(!batchId) return;
-
+        __editBatchId = batchId;
         // stop previous listener so it can't reopen later
         stopEditBatchListener();
 
@@ -2567,6 +2569,51 @@ function showMetadata(id) {
 
     function deleteBatch(id) { if(confirm("Apagar lote?")) db.ref('active_batches/'+id).remove(); }
     
+
+
+    // Delete ENTIRE batch from the Batch Details modal
+    function deleteBatchFromModal(){
+        const id = __editBatchId;
+        if(!id) return;
+        if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+            return alert('Sem permissões para apagar lotes.');
+        }
+        if(!confirm("Apagar lote?")) return;
+
+        // Stop realtime listener so modal doesn't try to re-render while deleting
+        try{ stopEditBatchListener(); }catch(e){}
+
+        db.ref('active_batches/' + id).remove()
+          .then(() => {
+              // clear local saved batch selection if it was this one
+              try{
+                  if(localStorage.getItem('lastPackingBatch') === id) localStorage.removeItem('lastPackingBatch');
+              }catch(e){}
+
+              // close modal
+              try{ closeModal('edit-batch-modal'); }catch(e){
+                  // fallback if closeModal isn't available yet
+                  const m = document.getElementById('edit-batch-modal');
+                  if(m) m.style.display = 'none';
+              }
+
+              // best-effort refresh dropdowns/overview
+              try{ syncGlobalData(); }catch(e){}
+          })
+          .catch(err => {
+              console.error(err);
+              alert("Erro ao apagar lote.");
+          });
+    }
+
+    // Wire the modal delete button once
+    (function(){
+        try{
+            const btn = document.getElementById('modal-delete-btn');
+            if(btn) btn.onclick = deleteBatchFromModal;
+        }catch(e){}
+    })();
+
     // Helper (o OFF já tinha closeModal; isto complementa)
     function openModal(id) { document.getElementById(id).style.display = 'block'; }
 
