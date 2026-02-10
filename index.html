@@ -2567,9 +2567,52 @@ function showMetadata(id) {
         }
     }
 
-    function deleteBatch(id) { if(confirm("Apagar lote?")) db.ref('active_batches/'+id).remove(); }
-    
+    function _serverTs(){
+        try{ return (firebase && firebase.database && firebase.database.ServerValue && firebase.database.ServerValue.TIMESTAMP) ? firebase.database.ServerValue.TIMESTAMP : Date.now(); }
+        catch(e){ return Date.now(); }
+    }
 
+    async function archiveAndDeleteBatch(id){
+        if(!id) return;
+        // Only admins can delete entire batches
+        if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+            return alert('Sem permissões para apagar lotes.');
+        }
+
+        // 1) Read the batch (so we can archive its inventory/meta for Inventory undo)
+        const snap = await db.ref('active_batches/' + id).once('value');
+        const batch = snap.val();
+        if(!batch){
+            // If it's already gone, nothing to do
+            return;
+        }
+
+        const archive = Object.assign({}, batch, {
+            _deletedAt: _serverTs(),
+            _deletedBy: (currentUser && currentUser.email) ? currentUser.email : 'UNKNOWN',
+            _deletedType: 'ENTIRE_BATCH'
+        });
+
+        // 2) Write archive (best-effort). We keep the same key so Inventory can use sourceId=batchKey.
+        await db.ref('deleted_batches/' + id).set(archive);
+
+        // 3) Remove from active_batches so it disappears from WH picking immediately
+        await db.ref('active_batches/' + id).remove();
+
+        // cleanup local state
+        try{
+            if(localStorage.getItem('lastPackingBatch') === id) localStorage.removeItem('lastPackingBatch');
+        }catch(e){}
+    }
+
+    function deleteBatch(id) {
+        if(!id) return;
+        if(!confirm("Apagar lote?")) return;
+        archiveAndDeleteBatch(id).catch(err => {
+            console.error(err);
+            alert("Erro ao apagar lote.");
+        });
+    }
 
     // Delete ENTIRE batch from the Batch Details modal
     function deleteBatchFromModal(){
@@ -2583,7 +2626,7 @@ function showMetadata(id) {
         // Stop realtime listener so modal doesn't try to re-render while deleting
         try{ stopEditBatchListener(); }catch(e){}
 
-        db.ref('active_batches/' + id).remove()
+        archiveAndDeleteBatch(id)
           .then(() => {
               // clear local saved batch selection if it was this one
               try{
