@@ -2587,10 +2587,13 @@ function showMetadata(id) {
             return;
         }
 
+        const _invMonthKey = new Date().toISOString().slice(0,7); // YYYY-MM (mes do delete para undo no inventario)
+
         const archive = Object.assign({}, batch, {
             _deletedAt: _serverTs(),
             _deletedBy: (currentUser && currentUser.email) ? currentUser.email : 'UNKNOWN',
-            _deletedType: 'ENTIRE_BATCH'
+            _deletedType: 'ENTIRE_BATCH',
+            _invMonthKey: _invMonthKey
         });
 
         // 2) Write archive (best-effort). We keep the same key so Inventory can use sourceId=batchKey.
