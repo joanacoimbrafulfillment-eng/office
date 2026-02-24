@@ -665,10 +665,21 @@ document.addEventListener('click', (e) => {
         } catch(e) {}
 };
 
-    auth.onAuthStateChanged(user => {
-        if (user) { currentUser = user; setupUI(user.email); } 
-        else { document.getElementById('login-screen').style.display = 'flex'; document.getElementById('main-interface').style.display = 'none'; }
-    });
+  auth.onAuthStateChanged(user => {
+    if (user) {
+        // Verifica se o email foi confirmado 
+        if (user.emailVerified) {
+            currentUser = user; 
+            setupUI(user.email); 
+        } else {
+            alert("Por favor, verifica o teu email antes de entrar.");
+            auth.signOut(); // Não  deixa logar quem não confirmou
+        }
+    } else { 
+        document.getElementById('login-screen').style.display = 'flex'; 
+        document.getElementById('main-interface').style.display = 'none'; 
+    }
+});
 
     async function handleLogin() {
         const e = document.getElementById('login-email').value, p = document.getElementById('login-pass').value;
