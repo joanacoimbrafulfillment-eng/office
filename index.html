@@ -681,10 +681,23 @@ document.addEventListener('click', (e) => {
     }
 });
 
-    async function handleLogin() {
-        const e = document.getElementById('login-email').value, p = document.getElementById('login-pass').value;
-        try { await auth.signInWithEmailAndPassword(e, p); } catch(e) { alert("Invalid credentials."); }
+   async function handleLogin() {
+    const e = document.getElementById('login-email').value;
+    const p = document.getElementById('login-pass').value;
+    try { 
+        const userCredential = await auth.signInWithEmailAndPassword(e, p);
+        const user = userCredential.user;
+
+        if (!user.emailVerified) {
+            // Enviar email automaticamente se tentar entrar e não estiver verificado
+            await user.sendEmailVerification();
+            alert("Email não verificado! Enviámos agora um link de confirmação para a tua caixa de entrada.");
+            await auth.signOut();
+        }
+    } catch(error) { 
+        alert("Credenciais inválidas ou erro de ligação."); 
     }
+}
 
     function setupUI(email) {
         document.getElementById('login-screen').style.display = 'none';
