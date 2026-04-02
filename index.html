@@ -650,14 +650,14 @@ document.addEventListener('click', (e) => {
     });
 
     window.onload = () => { 
-        const today = new Date().toISOString().split('T')[0];
+        const today = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
         document.querySelectorAll('input[type="date"]').forEach(i => i.value = today);
     
         try {
             var todayObj = new Date();
-            var end = todayObj.toISOString().split('T')[0];
+            var end = todayObj.getFullYear()+'-'+String(todayObj.getMonth()+1).padStart(2,'0')+'-'+String(todayObj.getDate()).padStart(2,'0');
             var startObj = new Date(todayObj.getTime() - (7 * 24 * 60 * 60 * 1000));
-            var start = startObj.toISOString().split('T')[0];
+            var start = startObj.getFullYear()+'-'+String(startObj.getMonth()+1).padStart(2,'0')+'-'+String(startObj.getDate()).padStart(2,'0');
             var sEl = document.getElementById('search-start-date');
             var eEl = document.getElementById('search-end-date');
             if (sEl) sEl.value = start;
@@ -1141,11 +1141,11 @@ function handleScan(v, mode) {
                 startTs: (typeof scanData.startTs === 'number') ? scanData.startTs : null,
                 endTs: endTs,
                 time: endTime, // Main sorting time
-                dateClean: new Date().toISOString().split('T')[0]
+                dateClean: (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()
             });
 
             // NEW: write to persistent ID history so SEARCH can show all events even across batch recreations
-            const dc = new Date().toISOString().split('T')[0];
+            const dc = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()
             const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
             const bKey = bId || "GENERAL";
             const bName = (m === 'PACKING' && activeBatchData && activeBatchData.name) ? activeBatchData.name : bKey;
@@ -1920,7 +1920,7 @@ function logBatchAction(bId, msg) {
     // - dateClean: YYYY-MM-DD
     // - time: HH:mm:ss (24h, always with seconds)
     // - DateTime: YYYY-MM-DD HH:mm:ss
-    function _nowDateClean(){ return new Date().toISOString().slice(0, 10); }
+    function _nowDateClean(){ var d=new Date(); var y=d.getFullYear(); var m=String(d.getMonth()+1).padStart(2,'0'); var day=String(d.getDate()).padStart(2,'0'); return y+'-'+m+'-'+day; }
     function _nowTime(){
         return new Intl.DateTimeFormat('pt-PT', {
             hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
@@ -2449,7 +2449,7 @@ let _currentSection = "";
 
 function _todayDateClean(){
     try{ if(typeof _nowDateClean === 'function') return _nowDateClean(); }catch(e){}
-    return new Date().toISOString().split('T')[0];
+    var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 function _selectedOverviewDate(){
     const el = document.getElementById('global-date-filter');
@@ -2587,7 +2587,7 @@ function showMetadata(id) {
             return;
         }
 
-        const _invMonthKey = new Date().toISOString().slice(0,7); // YYYY-MM (mes do delete para undo no inventario)
+        const _invMonthKey = (function(){var d=new Date();var y=d.getFullYear();var m=String(d.getMonth()+1).padStart(2,'0');return y+'-'+m;})(); // YYYY-MM (mes do delete para undo no inventario)
 
         const archive = Object.assign({}, batch, {
             _deletedAt: _serverTs(),
@@ -2744,7 +2744,7 @@ function showMetadata(id) {
 
         const endTime = _nowTime();
         const endTs = Date.now();
-        const dc = _nowDateClean ? _nowDateClean() : new Date().toISOString().split('T')[0];
+        const dc = _nowDateClean ? _nowDateClean() : (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
 
         const newProds = packedEditState.items.length ? packedEditState.items.join(' | ') : "No Items";
@@ -3027,9 +3027,9 @@ function closeModal(id) {
         document.getElementById('off-order-meta').value="";
 }
 
-function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: new Date().toISOString().split('T')[0] }).then(() => { resetScan(); loadPrePackHistory(); }); }
+function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: (function(){var d=new Date();var y=d.getFullYear();var m=String(d.getMonth()+1).padStart(2,'0');var day=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+day;})() }).then(() => { resetScan(); loadPrePackHistory(); }); }
     function loadRecentReturns() { db.ref('registos').limitToLast(10).on('value', snap => { const tbody = document.querySelector('#recent-returns-table tbody'); tbody.innerHTML = ""; const data = snap.val(); if(!data) return; Object.keys(data).reverse().forEach(k => { const r = data[k]; if(r.mode === 'RETURN') tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; }); }); }
-    function loadPrePackHistory() { const fD = new Date().toISOString().split('T')[0]; db.ref('pre_packing').on('value', snap => { const tbody = document.querySelector('#prepack-recent-table tbody'); tbody.innerHTML = ""; if(!snap.val()) return; Object.keys(snap.val()).reverse().forEach(k => { const r = snap.val()[k]; if(r.dateClean === fD) tbody.innerHTML += `<tr><td>${r.time}</td><td>${r.product}</td><td><button class="btn-small btn-delete" onclick="db.ref('pre_packing/${k}').remove()">X</button></td></tr>`; }); }); }
+    function loadPrePackHistory() { const fD = (function(){var d=new Date();var y=d.getFullYear();var m=String(d.getMonth()+1).padStart(2,'0');var day=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+day;})(); db.ref('pre_packing').on('value', snap => { const tbody = document.querySelector('#prepack-recent-table tbody'); tbody.innerHTML = ""; if(!snap.val()) return; Object.keys(snap.val()).reverse().forEach(k => { const r = snap.val()[k]; if(r.dateClean === fD) tbody.innerHTML += `<tr><td>${r.time}</td><td>${r.product}</td><td><button class="btn-small btn-delete" onclick="db.ref('pre_packing/${k}').remove()">X</button></td></tr>`; }); }); }
     function updateDisplay(m) { const p = (m === 'RETURN' ? 'rv-' : 'v-'); document.getElementById(p+'id').innerText = scanData.id||"-"; document.getElementById(p+'track').innerText = scanData.track||"-"; const container = document.getElementById(p+'prods'); container.innerHTML = ""; scanData.prods.forEach(name => { container.innerHTML += `<div class="prod-tag"><span>${name}</span></div>`; }); }
 
     document.getElementById('main-input').addEventListener('keypress', e => { if(e.key==='Enter'){ handleScan(e.target.value.trim()); e.target.value=""; } });
