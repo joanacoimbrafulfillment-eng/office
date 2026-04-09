@@ -6,46 +6,7 @@
     <title>WH-MURTEDE LOGISTICS - V95 TOTAL CONTROL</title>
     
     <!-- SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js">
-// ===== MASTER DATA UI WIRING =====
-document.addEventListener('DOMContentLoaded', function(){
-  var ms = document.getElementById('master-search');
-  if(ms && !ms.__wired){
-    ms.__wired = true;
-    ms.addEventListener('input', function(){ try{ updateMasterPreview(); }catch(e){} });
-  }
-  // render once after load
-  setTimeout(function(){ try{ updateMasterPreview(); }catch(e){} }, 700);
-});
-
-
-function exportMasterDB(){
-  try{
-    var rows = [["barcode","product_name"]];
-    Object.keys(masterProductsDB||{}).sort().forEach(function(k){
-      rows.push([k, masterProductsDB[k]||""]);
-    });
-    var csv = rows.map(function(r){
-      return r.map(function(v){
-        v = (v===undefined||v===null) ? "" : String(v);
-        if(v.includes('"') || v.includes(",") || v.includes("\n")) return '"' + v.replace(/"/g,'""') + '"';
-        return v;
-      }).join(",");
-    }).join("\n");
-    var blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "master_products.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-  }catch(e){ console.error(e); alert("Erro ao exportar."); }
-}
-window.exportMasterDB = exportMasterDB;
-
-</script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <!-- EXCEL EXPORT LIBRARY -->
@@ -601,6 +562,17 @@ window.exportMasterDB = exportMasterDB;
 
     <hr style="margin:30px 0;">
 
+    <h3>🗂️ Arquivar Lotes Concluídos</h3>
+    <p style="color:#666; font-size:14px;">Move lotes com status COMPLETED para arquivo. O histórico de search continua disponível. Recomendado fazer periodicamente para reduzir downloads.</p>
+    <div id="archive-preview" style="margin-bottom:10px; font-size:14px; color:#444;"></div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn-submit" style="background:#0ea5e9; width:auto; padding:12px 24px;" onclick="previewArchiveBatches()">VER LOTES PARA ARQUIVAR</button>
+        <button id="btn-do-archive" class="btn-submit" style="background:#e67e22; width:auto; padding:12px 24px; display:none;" onclick="doArchiveBatches()">ARQUIVAR AGORA</button>
+    </div>
+    <div id="archive-status" style="margin-top:10px; font-size:13px; color:#666;"></div>
+
+    <hr style="margin:30px 0;">
+
     <h3>🚚 Gerir Transportadoras</h3>
 
     <div class="grid-2">
@@ -758,8 +730,10 @@ document.addEventListener('click', (e) => {
         const inRange = (d) => (d && d >= start && d <= end);
 
         if (type === 'ACTIVITY') {
-            const snap = await db.ref('registos').once('value');
-            const batchSnap = await db.ref('active_batches').once('value');
+            const [snap, batchSnap] = await Promise.all([
+                db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
+                db.ref('active_batches').once('value')
+            ]);
             const batches = batchSnap.val() || {};
 
             Object.values(snap.val() || {}).forEach(r => {
@@ -1524,20 +1498,8 @@ function _parseIds(raw) {
         var regData = regSnap.val() || {};
 
         // Batch metadata for carrier/name enrichment
-// NOTE: cancellations can be stored only inside active_batches/<batch>/cancelled_ids (older data),
-// so when searching CANCELLED (or status CANCELLED / search-all), load all batches for correct results.
-var batchSnap;
-var needAllBatches = true;
-if (needAllBatches) {
-    batchSnap = await db.ref('active_batches').once('value');
-} else {
-    var batchRef = db.ref('active_batches');
-    // keep it range-limited for performance; id_history already carries full batch created/cancel events (new data)
-    if (start && end) batchRef = batchRef.orderByChild('dateClean').startAt(start).endAt(end);
-    else batchRef = batchRef.orderByChild('dateClean');
-    batchSnap = await batchRef.once('value');
-}
-var batchData = batchSnap.val() || {};
+        // Carrega active_batches + deleted_batches para garantir histórico completo mesmo após arquivo
+        var batchData = await _loadAllBatchesForSearch();
 
 
         function _eventKey(ev){
@@ -1816,13 +1778,14 @@ function loadPerformanceStats() {
         const date = document.getElementById('perf-date-filter').value;
         const tbody = document.querySelector('#perf-table tbody');
         let stats = {};
-        db.ref('registos').once('value', snap => {
-            db.ref('pre_packing').once('value', preSnap => {
-                Object.values(snap.val() || {}).forEach(r => { if(r.dateClean === date) { if(!stats[r.user]) stats[r.user] = { p:0, r:0, pre:0 }; if(r.mode === 'PACKING') stats[r.user].p++; if(r.mode === 'RETURN') stats[r.user].r++; } });
-                Object.values(preSnap.val() || {}).forEach(p => { if(p.dateClean === date) { if(!stats[p.user]) stats[p.user] = { p:0, r:0, pre:0 }; stats[p.user].pre++; } });
-                tbody.innerHTML = "";
-                Object.keys(stats).sort().forEach(u => { const s = stats[u]; tbody.innerHTML += `<tr><td><b>${u}</b></td><td>${s.p}</td><td>${s.r}</td><td>${s.pre}</td><td>${s.p+s.r+s.pre}</td></tr>`; });
-            });
+        Promise.all([
+            db.ref('registos').orderByChild('dateClean').equalTo(date).once('value'),
+            db.ref('pre_packing').orderByChild('dateClean').equalTo(date).once('value')
+        ]).then(([snap, preSnap]) => {
+            Object.values(snap.val() || {}).forEach(r => { if(!stats[r.user]) stats[r.user] = { p:0, r:0, pre:0 }; if(r.mode === 'PACKING') stats[r.user].p++; if(r.mode === 'RETURN') stats[r.user].r++; });
+            Object.values(preSnap.val() || {}).forEach(p => { if(!stats[p.user]) stats[p.user] = { p:0, r:0, pre:0 }; stats[p.user].pre++; });
+            tbody.innerHTML = "";
+            Object.keys(stats).sort().forEach(u => { const s = stats[u]; tbody.innerHTML += `<tr><td><b>${u}</b></td><td>${s.p}</td><td>${s.r}</td><td>${s.pre}</td><td>${s.p+s.r+s.pre}</td></tr>`; });
         });
     }
 
@@ -2106,18 +2069,24 @@ if(metaEl){
         });
     }
 
+    let __offProcessedRef = null, __offProcessedCb = null;
     function updateProcessedTable(bId) {
-        db.ref('registos').on('value', snap => {
+        if(__offProcessedRef && __offProcessedCb){ __offProcessedRef.off('value', __offProcessedCb); }
+        __offProcessedRef = db.ref('registos').orderByChild('batch').equalTo(bId).limitToLast(5000);
+        __offProcessedCb = snap => {
             const tbody = document.querySelector('#recent-scans-table tbody'); tbody.innerHTML = "";
             const data = snap.val(); if(!data) return;
-            Object.keys(data).reverse().forEach(key => {
-                const r = data[key];
-                if(r.batch === bId) {
-                    const det = (activeBatchData && activeBatchData.order_details && activeBatchData.order_details[r.id]) ? activeBatchData.order_details[r.id] : {name:"---"};
-                    tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${det.name}</td><td><button class="btn-small btn-delete" onclick="removeRecentScan('${key}', '${r.id}', '${r.prods}', '${bId}')">X</button></td></tr>`;
-                }
+            const rows = [];
+            Object.entries(data).forEach(([key, r]) => {
+                if(!r || r.batch !== bId || (r.mode||'').toUpperCase() !== 'PACKING') return;
+                rows.push({key, r});
             });
-        });
+            rows.reverse().forEach(({key, r}) => {
+                const det = (activeBatchData && activeBatchData.order_details && activeBatchData.order_details[r.id]) ? activeBatchData.order_details[r.id] : {name:"---"};
+                tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${det.name}</td><td><button class="btn-small btn-delete" onclick="removeRecentScan('${key}', '${r.id}', '${r.prods}', '${bId}')">X</button></td></tr>`;
+            });
+        };
+        __offProcessedRef.on('value', __offProcessedCb);
     }
 
     function removeRecentScan(recId, orderId, itemsStr, bId) { if(!confirm(`Apagar registo do ID ${orderId}?`)) return; db.ref('registos/' + recId).remove().then(() => { if(bId) db.ref(`active_batches/${bId}/processed_ids/${orderId}`).remove(); }); }
@@ -2567,6 +2536,112 @@ function showMetadata(id) {
         }
     }
 
+    // ============================================================
+    // 🗂️ ARQUIVO DE LOTES COMPLETED (reduz active_batches)
+    // ============================================================
+    let __batchesToArchive = [];
+
+    async function previewArchiveBatches() {
+        const previewEl = document.getElementById('archive-preview');
+        const btnDo = document.getElementById('btn-do-archive');
+        const statusEl = document.getElementById('archive-status');
+        if(!previewEl || !btnDo) return;
+
+        previewEl.innerHTML = '<span style="color:#888;">A carregar lotes...</span>';
+        statusEl.textContent = '';
+        btnDo.style.display = 'none';
+        __batchesToArchive = [];
+
+        try {
+            const snap = await db.ref('active_batches').once('value');
+            const all = snap.val() || {};
+            const completed = [];
+
+            Object.entries(all).forEach(([k, b]) => {
+                if(!b) return;
+                if((b.status || '').toUpperCase() === 'COMPLETED') {
+                    completed.push({ key: k, name: b.name || k, date: b.dateClean || '?', carrier: b.carrier || '?' });
+                }
+            });
+
+            if(!completed.length) {
+                previewEl.innerHTML = '<span style="color:#27ae60;">✅ Não há lotes COMPLETED para arquivar.</span>';
+                return;
+            }
+
+            completed.sort((a, b) => a.date.localeCompare(b.date));
+            __batchesToArchive = completed;
+
+            previewEl.innerHTML = `
+                <b>${completed.length} lote(s) COMPLETED prontos para arquivar:</b>
+                <div style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:8px; padding:8px; background:#f9f9f9;">
+                    ${completed.map(b => `<div style="padding:4px 0; border-bottom:1px solid #eee; font-size:13px;">
+                        📦 <b>${b.name}</b> — ${b.date} — ${b.carrier}
+                    </div>`).join('')}
+                </div>
+                <div style="margin-top:8px; color:#e67e22; font-size:13px;">⚠️ Os lotes ficam em <b>deleted_batches</b> e o Search continua a encontrar o histórico completo.</div>
+            `;
+            btnDo.style.display = 'inline-block';
+        } catch(e) {
+            console.error(e);
+            previewEl.innerHTML = '<span style="color:red;">Erro ao carregar lotes.</span>';
+        }
+    }
+
+    async function doArchiveBatches() {
+        if(!__batchesToArchive.length) return;
+        if(!confirm(`Arquivar ${__batchesToArchive.length} lote(s) COMPLETED? O histórico fica disponível no Search.`)) return;
+
+        const btnDo = document.getElementById('btn-do-archive');
+        const statusEl = document.getElementById('archive-status');
+        const previewEl = document.getElementById('archive-preview');
+        if(btnDo) btnDo.style.display = 'none';
+
+        let done = 0, errors = 0;
+        for(const b of __batchesToArchive) {
+            try {
+                if(statusEl) statusEl.textContent = `A arquivar ${done + 1}/${__batchesToArchive.length}: ${b.name}...`;
+                await archiveAndDeleteBatch(b.key);
+                done++;
+            } catch(e) {
+                console.error('Erro a arquivar ' + b.key, e);
+                errors++;
+            }
+        }
+
+        __batchesToArchive = [];
+        if(statusEl) statusEl.textContent = `✅ Arquivados: ${done} lote(s).${errors ? ' ⚠️ Erros: ' + errors : ''}`;
+        if(previewEl) previewEl.innerHTML = '';
+    }
+    window.previewArchiveBatches = previewArchiveBatches;
+    window.doArchiveBatches = doArchiveBatches;
+
+    // ============================================================
+    // 🔍 HELPER: carregar batch de active_batches OU deleted_batches
+    // Usado pelo search para garantir histórico completo mesmo após arquivo
+    // ============================================================
+    let __allBatchesCache = null; // { ...active_batches, ...deleted_batches }
+    let __allBatchesCacheTs = 0;
+    const __ALL_BATCHES_CACHE_TTL = 60000; // 1 minuto
+
+    async function _loadAllBatchesForSearch() {
+        const now = Date.now();
+        if(__allBatchesCache && (now - __allBatchesCacheTs) < __ALL_BATCHES_CACHE_TTL) {
+            return __allBatchesCache;
+        }
+        // Carregar active_batches e deleted_batches em paralelo
+        const [activeSnap, deletedSnap] = await Promise.all([
+            db.ref('active_batches').once('value'),
+            db.ref('deleted_batches').once('value')
+        ]);
+        const active = activeSnap.val() || {};
+        const deleted = deletedSnap.val() || {};
+        // Merge: active tem prioridade (dados mais recentes)
+        __allBatchesCache = Object.assign({}, deleted, active);
+        __allBatchesCacheTs = now;
+        return __allBatchesCache;
+    }
+
     function _serverTs(){
         try{ return (firebase && firebase.database && firebase.database.ServerValue && firebase.database.ServerValue.TIMESTAMP) ? firebase.database.ServerValue.TIMESTAMP : Date.now(); }
         catch(e){ return Date.now(); }
@@ -2601,6 +2676,9 @@ function showMetadata(id) {
 
         // 3) Remove from active_batches so it disappears from WH picking immediately
         await db.ref('active_batches/' + id).remove();
+
+        // Invalidate merged batch cache so search picks up the move immediately
+        __allBatchesCache = null;
 
         // cleanup local state
         try{
@@ -2701,8 +2779,8 @@ function showMetadata(id) {
     }
 
     async function openPackedItemsEditor(batchKey, orderId){
-        // encontra o ÚLTIMO registo PACKING desse ID nesse batch
-        const snap = await db.ref('registos').once('value');
+        // filtrado por batch — evita ler registos inteiro
+        const snap = await db.ref('registos').orderByChild('batch').equalTo(batchKey).once('value');
         const all = snap.val() || {};
 
         let best = null; // { key, r, sortKey }
@@ -3028,8 +3106,34 @@ function closeModal(id) {
 }
 
 function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: (function(){var d=new Date();var y=d.getFullYear();var m=String(d.getMonth()+1).padStart(2,'0');var day=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+day;})() }).then(() => { resetScan(); loadPrePackHistory(); }); }
-    function loadRecentReturns() { db.ref('registos').limitToLast(10).on('value', snap => { const tbody = document.querySelector('#recent-returns-table tbody'); tbody.innerHTML = ""; const data = snap.val(); if(!data) return; Object.keys(data).reverse().forEach(k => { const r = data[k]; if(r.mode === 'RETURN') tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; }); }); }
-    function loadPrePackHistory() { const fD = (function(){var d=new Date();var y=d.getFullYear();var m=String(d.getMonth()+1).padStart(2,'0');var day=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+day;})(); db.ref('pre_packing').on('value', snap => { const tbody = document.querySelector('#prepack-recent-table tbody'); tbody.innerHTML = ""; if(!snap.val()) return; Object.keys(snap.val()).reverse().forEach(k => { const r = snap.val()[k]; if(r.dateClean === fD) tbody.innerHTML += `<tr><td>${r.time}</td><td>${r.product}</td><td><button class="btn-small btn-delete" onclick="db.ref('pre_packing/${k}').remove()">X</button></td></tr>`; }); }); }
+    let __offReturnRef = null, __offReturnCb = null;
+    function loadRecentReturns() {
+        const tbody = document.querySelector('#recent-returns-table tbody'); if(!tbody) return;
+        const today = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+        const u = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
+        if(__offReturnRef && __offReturnCb){ __offReturnRef.off('value', __offReturnCb); }
+        __offReturnRef = db.ref('registos').orderByChild('user').equalTo(u).limitToLast(300);
+        __offReturnCb = snap => {
+            tbody.innerHTML = "";
+            const rows = [];
+            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; if((r.mode||'').toUpperCase()!=='RETURN' || r.dateClean!==today) return; rows.push({k,r}); });
+            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; });
+        };
+        __offReturnRef.on('value', __offReturnCb);
+    }
+    let __offPrepackRef = null, __offPrepackCb = null;
+    function loadPrePackHistory() {
+        const fD = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+        const tbody = document.querySelector('#prepack-recent-table tbody'); if(!tbody) return;
+        if(__offPrepackRef && __offPrepackCb){ __offPrepackRef.off('value', __offPrepackCb); }
+        __offPrepackRef = db.ref('pre_packing').orderByChild('dateClean').equalTo(fD).limitToLast(400);
+        __offPrepackCb = snap => {
+            tbody.innerHTML = "";
+            if(!snap.val()) return;
+            Object.entries(snap.val()).reverse().forEach(([k,r]) => { tbody.innerHTML += `<tr><td>${r.time}</td><td>${r.product}</td><td><button class="btn-small btn-delete" onclick="db.ref('pre_packing/${k}').remove()">X</button></td></tr>`; });
+        };
+        __offPrepackRef.on('value', __offPrepackCb);
+    }
     function updateDisplay(m) { const p = (m === 'RETURN' ? 'rv-' : 'v-'); document.getElementById(p+'id').innerText = scanData.id||"-"; document.getElementById(p+'track').innerText = scanData.track||"-"; const container = document.getElementById(p+'prods'); container.innerHTML = ""; scanData.prods.forEach(name => { container.innerHTML += `<div class="prod-tag"><span>${name}</span></div>`; }); }
 
     document.getElementById('main-input').addEventListener('keypress', e => { if(e.key==='Enter'){ handleScan(e.target.value.trim()); e.target.value=""; } });
@@ -3986,5 +4090,42 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 })();
 </script>
 
+
+<script>
+// ===== MASTER DATA UI WIRING (movido de script src inválido) =====
+document.addEventListener('DOMContentLoaded', function(){
+  var ms = document.getElementById('master-search');
+  if(ms && !ms.__wired){
+    ms.__wired = true;
+    ms.addEventListener('input', function(){ try{ updateMasterPreview(); }catch(e){} });
+  }
+  setTimeout(function(){ try{ updateMasterPreview(); }catch(e){} }, 700);
+});
+function exportMasterDB(){
+  try{
+    var rows = [["barcode","product_name"]];
+    Object.keys(masterProductsDB||{}).sort().forEach(function(k){
+      rows.push([k, masterProductsDB[k]||""]);
+    });
+    var csv = rows.map(function(r){
+      return r.map(function(v){
+        v = (v===undefined||v===null) ? "" : String(v);
+        if(v.includes('"') || v.includes(",") || v.includes("\n")) return '"' + v.replace(/"/g,'""') + '"';
+        return v;
+      }).join(",");
+    }).join("\n");
+    var blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "master_products.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  }catch(e){ console.error(e); alert("Erro ao exportar."); }
+}
+window.exportMasterDB = exportMasterDB;
+</script>
 </body>
 </html>
