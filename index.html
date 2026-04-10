@@ -2503,7 +2503,7 @@ function initRealtimeCore(){
 
 // OVERVIEW behavior:
 // - If selected day == today: realtime updates (cards + kanban)
-// - If selected day != today: snapshot only (no continuous updates) => old data only when user deliberately changes the date
+// - If selected day != today: snapshot only; also loads archived batches for that date
 function syncGlobalData() {
     const fD = _selectedOverviewDate();
     const today = _todayDateClean();
@@ -2513,16 +2513,48 @@ function syncGlobalData() {
 
     if(fD === today){
         startPrepackCardListener(fD);
-    }else{
+        // render immediately from cache (realtime listener keeps it fresh)
+        const bts = _activeBatchesCache || {};
+        try{ updateDashboardStats(bts, fD); }catch(e){}
+        try{ renderManagementUI(bts, fD); }catch(e){}
+        try{ updateSelects(bts, fD); }catch(e){}
+    } else {
         stopPrepackCardListener();
         loadPrepackCardOnce(fD);
+        _syncOverviewForPastDate(fD);
     }
+}
 
-    // render immediately from the latest cache we have
-    const bts = _activeBatchesCache || {};
-    try{ updateDashboardStats(bts, fD); }catch(e){}
-    try{ renderManagementUI(bts, fD); }catch(e){}
-    try{ updateSelects(bts, fD); }catch(e){}
+// Cache de lotes arquivados por data (evita downloads repetidos)
+const _archivedByDateCache = {};
+
+async function _syncOverviewForPastDate(fD) {
+    try {
+        // Lotes activos para esta data (já no cache do listener)
+        const activeBts = _activeBatchesCache || {};
+
+        // Verificar se já temos os archived para esta data em cache
+        if(!_archivedByDateCache[fD]) {
+            // Só descarregar deleted_batches filtrado por esta data — 1 download, fica em cache
+            const snap = await db.ref('deleted_batches')
+                .orderByChild('dateClean').equalTo(fD).once('value');
+            _archivedByDateCache[fD] = snap.val() || {};
+        }
+
+        // Merge: active tem prioridade (caso um lote tenha sido re-activado)
+        const merged = Object.assign({}, _archivedByDateCache[fD], activeBts);
+
+        try{ updateDashboardStats(merged, fD); }catch(e){}
+        try{ renderManagementUI(merged, fD); }catch(e){}
+        try{ updateSelects(merged, fD); }catch(e){}
+    } catch(e) {
+        console.error('_syncOverviewForPastDate error:', e);
+        // Fallback: render só com active_batches
+        const bts = _activeBatchesCache || {};
+        try{ updateDashboardStats(bts, fD); }catch(e2){}
+        try{ renderManagementUI(bts, fD); }catch(e2){}
+        try{ updateSelects(bts, fD); }catch(e2){}
+    }
 }
 
 function showMetadata(id) {
@@ -2679,6 +2711,11 @@ function showMetadata(id) {
 
         // Invalidate merged batch cache so search picks up the move immediately
         __allBatchesCache = null;
+        // Também invalidar cache do overview para a data deste lote
+        try{
+            const archivedBatch = (await db.ref('deleted_batches/' + id).once('value')).val();
+            if(archivedBatch && archivedBatch.dateClean) delete _archivedByDateCache[archivedBatch.dateClean];
+        }catch(_e){}
 
         // cleanup local state
         try{
