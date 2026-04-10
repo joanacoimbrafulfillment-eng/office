@@ -75,6 +75,23 @@
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
         input, textarea, select { width: 100%; padding: 15px; margin: 8px 0; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box; }
         .location-tag { background: #fee2e2; color: #991b1b; padding: 5px 12px; border-radius: 8px; font-weight: 900; font-size: 20px; margin-left: auto; border: 1px solid #f87171; }
+
+        /* FIX: carrier select in Batch Details modal should not clip text */
+        #modal-carrier-row > div {
+            min-width: 0;
+        }
+        #modal-carrier-select {
+            width: auto !important;
+            min-width: 0;
+            flex: 1 1 auto;
+            padding: 10px 38px 10px 12px !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #modal-carrier-save {
+            flex: 0 0 auto;
+        }
     </style>
 </head>
 <body>
@@ -103,11 +120,11 @@
             <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
 
                 <!-- CARRIER -->
-                <div id="modal-carrier-row" style="flex:1; min-width:180px;">
+                <div id="modal-carrier-row" style="flex:1; min-width:220px;">
                     <label style="font-weight:900; font-size:11px; color:#475569;">🚚 Transportadora</label>
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <select id="modal-carrier-select" style="height:42px; font-size:14px; flex:1; margin:4px 0;"></select>
-                        <button id="modal-carrier-save" class="btn-small" style="background:var(--accent); padding:10px 14px; height:42px; white-space:nowrap;" onclick="saveBatchCarrierFromModal()">GUARDAR</button>
+                    <div style="display:flex; gap:6px; align-items:center; min-width:0;">
+                        <select id="modal-carrier-select" style="flex:1 1 auto; min-width:0; width:auto; height:42px; font-size:14px; margin:4px 0; padding:10px 38px 10px 12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></select>
+                        <button id="modal-carrier-save" class="btn-small" style="background:var(--accent); padding:10px 14px; height:42px; white-space:nowrap; flex:0 0 auto;" onclick="saveBatchCarrierFromModal()">GUARDAR</button>
                     </div>
                     <div id="modal-carrier-status" style="display:none; font-size:11px; color:#0f766e; font-weight:900; margin-top:2px;"></div>
                 </div>
@@ -2011,11 +2028,21 @@ function loadPerformanceStats() {
             if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
                 return alert('Sem permissões para eliminar IDs.');
             }
-            if(!confirm(`ELIMINAR o ID ${orderId} do lote?\n\nEsta ação remove o ID definitivamente da lista do lote.\nSe apenas quiser bloquear, use CANCELAR.`)) return;
+
+            const batchSnap = await db.ref('active_batches/' + batchId).once('value');
+            const batch = batchSnap.val() || {};
+            const alreadyPacked = !!(batch.processed_ids && batch.processed_ids[orderId]);
+            if(alreadyPacked){
+                return alert('Este ID já foi picado pelo operador e já não pode ser eliminado. Pode ser cancelado a qualquer momento.');
+            }
+
+            if(!confirm(`ELIMINAR o ID ${orderId} do lote?
+
+Esta ação remove o ID definitivamente da lista do lote.
+Se apenas quiser bloquear, use CANCELAR.`)) return;
 
             // Ler expected_ids atual e filtrar
-            const snap = await db.ref('active_batches/' + batchId + '/expected_ids').once('value');
-            const ids = snap.val() || [];
+            const ids = batch.expected_ids || [];
             const newIds = ids.filter(id => id !== orderId);
             await db.ref('active_batches/' + batchId + '/expected_ids').set(newIds);
 
@@ -2030,14 +2057,12 @@ function loadPerformanceStats() {
 
             // Registar no histórico do ID
             try{
-                const bSnap = await db.ref('active_batches/' + batchId).once('value');
-                const b = bSnap.val() || {};
                 const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : 'UNKNOWN';
                 await pushIdHistory(orderId, {
                     Type: 'ELIMINADO',
                     BatchKey: batchId,
-                    Batch: b.name || batchId,
-                    Carrier: b.carrier || 'N/A',
+                    Batch: batch.name || batchId,
+                    Carrier: batch.carrier || 'N/A',
                     User: uname,
                     dateClean: _nowDateClean(),
                     time: _nowTime(),
@@ -2064,6 +2089,14 @@ function loadPerformanceStats() {
                 return alert('Sem permissões para editar.');
             }
 
+            const snapCheck = await db.ref('active_batches/' + batchId).once('value');
+            const batchCheck = snapCheck.val() || {};
+
+            const alreadyPacked = !!(batchCheck.processed_ids && batchCheck.processed_ids[orderId]);
+            if (alreadyPacked) {
+                return alert('Este ID já foi picado pelo operador e já não pode ser editado em Order Mapping.');
+            }
+
             const fieldLabels = { id: 'ID da encomenda', name: 'Nome do cliente', content: 'Conteúdo' };
 
             // For name/content, read from the safe store to avoid any HTML-escaping issues
@@ -2081,8 +2114,7 @@ function loadPerformanceStats() {
 
             if(field === 'id'){
                 // Renaming the ID: update expected_ids array + move order_details + move processed/cancelled keys
-                const snap = await db.ref('active_batches/' + batchId).once('value');
-                const b = snap.val() || {};
+                const b = batchCheck;
 
                 const ids = Array.isArray(b.expected_ids) ? [...b.expected_ids] : [];
                 const idx = ids.indexOf(orderId);
@@ -2255,6 +2287,7 @@ if(metaEl){
                 const cancelInfo = isCancelled ? b.cancelled_ids[id] : null;
 
                 const canEdit = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
+                const canEditOrderFields = canEdit && !isPack && !isCancelled;
 
                 // Store values safely — no risk of quote breakage in HTML
                 const storeKey = batchId + '||' + id;
@@ -2262,19 +2295,19 @@ if(metaEl){
 
                 const idCell = isCancelled
                     ? `<span style="color:#b91c1c; text-decoration:line-through; font-weight:900;">${id}</span>`
-                    : (canEdit
+                    : (canEditOrderFields
                         ? `<span style="display:flex;align-items:center;gap:4px;"><b>${id}</b><button class="btn-small" style="background:#64748b;padding:3px 7px;font-size:10px;" onclick="editOrderField('${batchId}','${id}','id','${id}')">✏️</button></span>`
                         : `<b>${id}</b>`);
 
                 const nameCell = isCancelled
                     ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.name || 'N/A'}</span>`
-                    : (canEdit
+                    : (canEditOrderFields
                         ? `<span style="display:flex;align-items:center;gap:4px;">${det.name || 'N/A'}<button class="btn-small" style="background:#64748b;padding:3px 7px;font-size:10px;" onclick="editOrderField('${batchId}','${id}','name')">✏️</button></span>`
                         : `${det.name || 'N/A'}`);
 
                 const contentCell = isCancelled
                     ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.content || 'N/A'}</span>`
-                    : (canEdit
+                    : (canEditOrderFields
                         ? `<span style="display:flex;align-items:center;gap:4px;">${det.content || 'N/A'}<button class="btn-small" style="background:#64748b;padding:3px 7px;font-size:10px;" onclick="editOrderField('${batchId}','${id}','content')">✏️</button></span>`
                         : `${det.content || 'N/A'}`);
 
@@ -2286,10 +2319,15 @@ if(metaEl){
                     ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span><div style="font-size:12px; color:#991b1b; margin-top:4px;">${(cancelInfo && cancelInfo.reason) ? ('Motivo: ' + cancelInfo.reason) : ''}</div>`
                     : (isPack ? '<span style="color:#166534; font-weight:900;">PACKED</span>' : '<span style="color:#92400e; font-weight:900;">PENDING</span>');
 
+                const canDeleteId = canEdit && !isPack;
+                const deleteBtn = canDeleteId
+                    ? `<button class="btn-small" style="background:#7f1d1d;" onclick="deleteBatchId('${batchId}', '${id}')">ELIMINAR</button>`
+                    : '';
+
                 const actionCell = isCancelled
-                    ? `<span style="display:flex;gap:6px;"><button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button><button class="btn-small" style="background:#7f1d1d;" onclick="deleteBatchId('${batchId}', '${id}')">ELIMINAR</button></span>`
+                    ? `<span style="display:flex;gap:6px;flex-wrap:wrap;"><button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button>${deleteBtn}</span>`
                     : (canEdit
-                        ? `<span style="display:flex;gap:6px;flex-wrap:wrap;">${isPack ? `<button class="btn-small" style="background:#0ea5e9;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button><button class="btn-small" style="background:#7f1d1d;" onclick="deleteBatchId('${batchId}', '${id}')">ELIMINAR</button></span>`
+                        ? `<span style="display:flex;gap:6px;flex-wrap:wrap;">${isPack ? `<button class="btn-small" style="background:#0ea5e9;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>${deleteBtn}</span>`
                         : '-');
                 html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
             });
