@@ -124,6 +124,19 @@
             </div>
         </div>
 
+        <!-- NAME EDIT (ADMIN) -->
+        <div id="modal-name-row" style="display:none; margin: 10px 0 20px 0; padding: 14px 16px; border: 1px solid #e5e7eb; border-radius: 14px; background: #f8fafc;">
+            <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:220px;">
+                    <label style="font-weight:900; font-size:12px; color:#475569;">✏️ Nome do Lote</label>
+                    <input type="text" id="modal-name-input" style="height:52px; font-size:15px;" placeholder="Novo nome do lote...">
+                    <div style="font-size:12px; color:#64748b; margin-top:6px;">Mudar o nome do lote (visível no OVERVIEW, selects e exports).</div>
+                </div>
+                <button class="btn-small" style="background: var(--accent); padding: 14px 18px; font-size: 14px; height:52px;" onclick="saveBatchNameFromModal()">GUARDAR</button>
+                <div id="modal-name-status" style="display:none; font-size:12px; color:#0f766e; font-weight:900;"></div>
+            </div>
+        </div>
+
         <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:30px;">
             <div>
                 <h4>📦 Inventory Status</h4>
@@ -1839,6 +1852,13 @@ function loadPerformanceStats() {
             if(dateInput && batchObj && batchObj.dateClean) dateInput.value = batchObj.dateClean;
             _setModalDateStatus('');
 
+            // NAME ROW
+            const nameRow = document.getElementById('modal-name-row');
+            const nameInput = document.getElementById('modal-name-input');
+            if(nameRow) nameRow.style.display = (canEdit) ? 'block' : 'none';
+            if(nameInput && batchObj && batchObj.name) nameInput.value = batchObj.name;
+            try{ _setModalNameStatus(''); }catch(_){}
+
             if(!canEdit) return;
 
             // build options from config; fallback defaults
@@ -1939,6 +1959,104 @@ function loadPerformanceStats() {
         }
     }
     window.saveBatchDateFromModal = saveBatchDateFromModal;
+
+    // ================================
+    // ✏️ BATCH NAME EDIT (inside Batch Details modal)
+    // ================================
+    function _setModalNameStatus(msg, ok=true){
+        const el = document.getElementById('modal-name-status');
+        if(!el) return;
+        el.style.display = msg ? 'block' : 'none';
+        el.style.color = ok ? '#0f766e' : '#b91c1c';
+        el.textContent = msg || '';
+    }
+
+    async function saveBatchNameFromModal(){
+        try{
+            const batchId = __editBatchId;
+            const inp = document.getElementById('modal-name-input');
+            if(!batchId || !inp) return;
+
+            if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+                return alert('Sem permissões para editar o nome.');
+            }
+
+            const newName = String(inp.value || '').trim();
+            if(!newName) return alert('Nome inválido.');
+
+            const snap = await db.ref('active_batches/' + batchId + '/name').once('value');
+            const prev = snap.val() || '';
+            if(String(prev) === newName){
+                _setModalNameStatus('Sem alterações (já era "' + newName + '").', true);
+                return;
+            }
+
+            await db.ref('active_batches/' + batchId + '/name').set(newName);
+            logBatchAction(batchId, 'NAME UPDATE: "' + (prev || 'N/A') + '" -> "' + newName + '"');
+            _setModalNameStatus('✅ Nome guardado: ' + newName);
+
+            // Atualiza o título do modal imediatamente
+            const titleEl = document.getElementById('edit-batch-title');
+            if(titleEl) titleEl.innerText = newName;
+        }catch(e){
+            console.error(e);
+            _setModalNameStatus('Erro ao guardar.', false);
+            alert('Erro ao guardar nome do lote.');
+        }
+    }
+    window.saveBatchNameFromModal = saveBatchNameFromModal;
+
+    // ================================
+    // 🗑️ ELIMINAR ID do lote (remove definitivamente de expected_ids)
+    // ================================
+    async function deleteBatchId(batchId, orderId){
+        try{
+            if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+                return alert('Sem permissões para eliminar IDs.');
+            }
+            if(!confirm(`ELIMINAR o ID ${orderId} do lote?\n\nEsta ação remove o ID definitivamente da lista do lote.\nSe apenas quiser bloquear, use CANCELAR.`)) return;
+
+            // Ler expected_ids atual e filtrar
+            const snap = await db.ref('active_batches/' + batchId + '/expected_ids').once('value');
+            const ids = snap.val() || [];
+            const newIds = ids.filter(id => id !== orderId);
+            await db.ref('active_batches/' + batchId + '/expected_ids').set(newIds);
+
+            // Limpar dados associados ao ID
+            await Promise.allSettled([
+                db.ref('active_batches/' + batchId + '/cancelled_ids/' + orderId).remove(),
+                db.ref('active_batches/' + batchId + '/processed_ids/' + orderId).remove(),
+                db.ref('active_batches/' + batchId + '/order_details/' + orderId).remove()
+            ]);
+
+            logBatchAction(batchId, 'ID ELIMINADO: ' + orderId);
+
+            // Registar no histórico do ID
+            try{
+                const bSnap = await db.ref('active_batches/' + batchId).once('value');
+                const b = bSnap.val() || {};
+                const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : 'UNKNOWN';
+                await pushIdHistory(orderId, {
+                    Type: 'ELIMINADO',
+                    BatchKey: batchId,
+                    Batch: b.name || batchId,
+                    Carrier: b.carrier || 'N/A',
+                    User: uname,
+                    dateClean: _nowDateClean(),
+                    time: _nowTime(),
+                    Tracking: '',
+                    Items_or_Content: '',
+                    Details: 'ID eliminado do lote pelo admin'
+                });
+            }catch(err){ console.warn('deleteBatchId pushIdHistory error', err); }
+
+            alert(`ID ${orderId} eliminado do lote.`);
+        }catch(e){
+            console.error(e);
+            alert('Erro ao eliminar o ID.');
+        }
+    }
+    window.deleteBatchId = deleteBatchId;
 
 function logBatchAction(bId, msg) {
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
@@ -2090,9 +2208,9 @@ if(metaEl){
 
                 const canCancel = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
                 const actionCell = isCancelled
-                    ? `<button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button>`
+                    ? `<span style="display:flex;gap:6px;"><button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button><button class="btn-small" style="background:#7f1d1d;" onclick="deleteBatchId('${batchId}', '${id}')">ELIMINAR</button></span>`
                     : (canCancel
-                        ? `${isPack ? `<button class="btn-small" style="background:#0ea5e9; margin-right:8px;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>`
+                        ? `<span style="display:flex;gap:6px;flex-wrap:wrap;">${isPack ? `<button class="btn-small" style="background:#0ea5e9;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button><button class="btn-small" style="background:#7f1d1d;" onclick="deleteBatchId('${batchId}', '${id}')">ELIMINAR</button></span>`
                         : '-');
                 html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
             });
