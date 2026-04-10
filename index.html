@@ -97,6 +97,75 @@
         #modal-carrier-save {
             flex: 0 0 auto;
         }
+    
+
+        /* Refactor-safe UI helpers */
+        .dashboard-grid {
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        }
+        .overview-kpi-clickable { cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+        .overview-kpi-clickable:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(0,0,0,0.08); }
+        .overview-filter-bar {
+            display:flex; gap:12px; align-items:center; justify-content:space-between;
+            flex-wrap:wrap; margin: 0 0 18px 0; padding: 14px 18px; background:#fff;
+            border:1px solid #e5e7eb; border-radius:14px; box-shadow: 0 4px 10px rgba(0,0,0,0.04);
+        }
+        .overview-filter-label { font-size:13px; color:#475569; font-weight:800; }
+        .overview-empty-card { min-width:420px; }
+        .overview-empty-action { background:var(--accent); margin-top:15px; padding:12px 18px; }
+        .carrier-header-title { font-weight:900; font-size:16px; line-height:1; }
+        .carrier-header-meta { font-size:12px; font-weight:800; opacity:.95; margin-top:6px; }
+        .batch-card-header { display:flex; justify-content:space-between; font-size:12px; color:#666; gap:10px; }
+        .batch-picked-meta { margin-top:6px; font-size:12px; color:#444; }
+        .batch-picked-at { color:#666; }
+        .batch-action-row { display:flex; gap:10px; margin-top:15px; }
+        .btn-accent-fill { background:var(--accent); flex:1; }
+
+        .app-toast-region {
+            position: fixed; top: 16px; right: 16px; z-index: 999999;
+            display: flex; flex-direction: column; gap: 10px; max-width: min(92vw, 420px);
+        }
+        .app-toast {
+            background: #0f172a; color: #fff; border-radius: 14px; padding: 14px 16px;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.25); font-size: 14px; line-height: 1.4;
+            border-left: 6px solid var(--accent); animation: toastIn .16s ease-out;
+            white-space: pre-wrap;
+        }
+        .app-toast--error { border-left-color: var(--error); }
+        .app-toast--success { border-left-color: var(--packing); }
+        .app-toast__title { font-weight: 900; margin-bottom: 6px; }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+        .app-dialog-backdrop {
+            position: fixed; inset: 0; background: rgba(15, 23, 42, 0.66); z-index: 1000000;
+            display: none; align-items: center; justify-content: center; padding: 20px;
+            backdrop-filter: blur(4px);
+        }
+        .app-dialog-backdrop.open { display: flex; }
+        .app-dialog {
+            width: min(92vw, 520px); background: #fff; color: #111827; border-radius: 18px;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.28); overflow: hidden;
+        }
+        .app-dialog__head { padding: 18px 20px 8px; font-size: 20px; font-weight: 900; }
+        .app-dialog__body { padding: 0 20px 18px; font-size: 15px; color: #374151; white-space: pre-wrap; }
+        .app-dialog__input { margin: 0 20px 12px; width: calc(100% - 40px); }
+        .app-dialog__actions {
+            display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px 20px;
+            border-top: 1px solid #e5e7eb; flex-wrap: wrap;
+        }
+        .app-dialog__btn {
+            border: none; border-radius: 10px; padding: 12px 18px; cursor: pointer;
+            font-weight: 900; font-size: 14px;
+        }
+        .app-dialog__btn--ghost { background: #e5e7eb; color: #111827; }
+        .app-dialog__btn--primary { background: var(--accent); color: #fff; }
+        @media (max-width: 820px){
+            .app-toast-region { left: 12px; right: 12px; max-width: none; }
+            .app-dialog { width: 100%; }
+            .app-dialog__actions { flex-direction: column-reverse; }
+            .app-dialog__btn { width: 100%; }
+        }
+
     </style>
 </head>
 <body>
@@ -643,6 +712,34 @@
     </div>
 </div>
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <script>
     const firebaseConfig = {
         apiKey: "AIzaSyDExvgmtrSILCATQgE8ICJX-SVntb5lM2Y",
@@ -655,6 +752,132 @@
     };
     firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth(), db = firebase.database();
+
+    const __uiState = { dialogResolver: null };
+
+    function __uiEnsureShell() {
+        if (document.getElementById('__app_toast_region')) return;
+
+        const toastRegion = document.createElement('div');
+        toastRegion.id = '__app_toast_region';
+        toastRegion.className = 'app-toast-region';
+        document.body.appendChild(toastRegion);
+
+        const backdrop = document.createElement('div');
+        backdrop.id = '__app_dialog_backdrop';
+        backdrop.className = 'app-dialog-backdrop';
+        backdrop.innerHTML = `
+            <div class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="__app_dialog_title">
+                <div class="app-dialog__head" id="__app_dialog_title"></div>
+                <div class="app-dialog__body" id="__app_dialog_body"></div>
+                <input id="__app_dialog_input" class="app-dialog__input" style="display:none;" />
+                <div class="app-dialog__actions">
+                    <button type="button" id="__app_dialog_cancel" class="app-dialog__btn app-dialog__btn--ghost">Cancelar</button>
+                    <button type="button" id="__app_dialog_ok" class="app-dialog__btn app-dialog__btn--primary">OK</button>
+                </div>
+            </div>`;
+        document.body.appendChild(backdrop);
+    }
+
+    function uiAlert(message, opts) {
+        __uiEnsureShell();
+        const options = opts || {};
+        const region = document.getElementById('__app_toast_region');
+        if (!region) return;
+
+        const toast = document.createElement('div');
+        const type = options.type || 'info';
+        toast.className = 'app-toast' + (type === 'error' ? ' app-toast--error' : (type === 'success' ? ' app-toast--success' : ''));
+        if (options.title) {
+            const title = document.createElement('div');
+            title.className = 'app-toast__title';
+            title.textContent = options.title;
+            toast.appendChild(title);
+        }
+        const body = document.createElement('div');
+        body.textContent = message == null ? '' : String(message);
+        toast.appendChild(body);
+        region.appendChild(toast);
+
+        const duration = typeof options.duration === 'number' ? options.duration : 4200;
+        window.setTimeout(function(){
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-4px)';
+            window.setTimeout(function(){ if (toast.parentNode) toast.parentNode.removeChild(toast); }, 180);
+        }, duration);
+    }
+
+    function __uiOpenDialog(config) {
+        __uiEnsureShell();
+        const backdrop = document.getElementById('__app_dialog_backdrop');
+        const title = document.getElementById('__app_dialog_title');
+        const body = document.getElementById('__app_dialog_body');
+        const input = document.getElementById('__app_dialog_input');
+        const ok = document.getElementById('__app_dialog_ok');
+        const cancel = document.getElementById('__app_dialog_cancel');
+
+        title.textContent = config.title || 'Confirmar';
+        body.textContent = config.message == null ? '' : String(config.message);
+        ok.textContent = config.okText || 'OK';
+        cancel.textContent = config.cancelText || 'Cancelar';
+
+        if (config.mode === 'prompt') {
+            input.style.display = 'block';
+            input.value = config.defaultValue || '';
+            input.placeholder = config.placeholder || '';
+        } else {
+            input.style.display = 'none';
+            input.value = '';
+            input.placeholder = '';
+        }
+
+        return new Promise(function(resolve){
+            function close(result){
+                backdrop.classList.remove('open');
+                ok.onclick = null;
+                cancel.onclick = null;
+                backdrop.onclick = null;
+                document.onkeydown = previousKeyHandler;
+                resolve(result);
+            }
+            const previousKeyHandler = document.onkeydown;
+            document.onkeydown = function(ev){
+                if (ev.key === 'Escape') close(config.mode === 'confirm' ? false : null);
+                if (ev.key === 'Enter' && config.mode === 'prompt') close(input.value);
+            };
+
+            ok.onclick = function(){ close(config.mode === 'prompt' ? input.value : true); };
+            cancel.onclick = function(){ close(config.mode === 'confirm' ? false : null); };
+            backdrop.onclick = function(ev){ if (ev.target === backdrop) cancel.onclick(); };
+            backdrop.classList.add('open');
+            window.setTimeout(function(){ (config.mode === 'prompt' ? input : ok).focus(); }, 20);
+        });
+    }
+
+    function uiConfirm(message, opts) {
+        const options = opts || {};
+        return __uiOpenDialog({
+            mode: 'confirm',
+            title: options.title || 'Confirmar',
+            message: message,
+            okText: options.okText || 'Confirmar',
+            cancelText: options.cancelText || 'Cancelar'
+        });
+    }
+
+    function uiPrompt(message, defaultValue, opts) {
+        const options = opts || {};
+        return __uiOpenDialog({
+            mode: 'prompt',
+            title: options.title || 'Editar',
+            message: message,
+            defaultValue: defaultValue || '',
+            placeholder: options.placeholder || '',
+            okText: options.okText || 'Guardar',
+            cancelText: options.cancelText || 'Cancelar'
+        });
+    }
+
 
     // scanData now includes startTime and endTime
     let currentUser = null, scanData = { id: "", track: "", prods: [], startTime: "", endTime: "", startTs: null, endTs: null };
@@ -701,7 +924,7 @@ document.addEventListener('click', (e) => {
 
     async function handleLogin() {
         const e = document.getElementById('login-email').value, p = document.getElementById('login-pass').value;
-        try { await auth.signInWithEmailAndPassword(e, p); } catch(e) { alert("Invalid credentials."); }
+        try { await auth.signInWithEmailAndPassword(e, p); } catch(e) { uiAlert("Invalid credentials."); }
     }
 
     function setupUI(email) {
@@ -886,7 +1109,7 @@ document.addEventListener('click', (e) => {
             });
         }
 
-        if (dataToExport.length === 0) return alert("No data found for these dates.");
+        if (dataToExport.length === 0) return uiAlert("No data found for these dates.");
         const ws = XLSX.utils.json_to_sheet(dataToExport);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Report");
@@ -1099,12 +1322,12 @@ document.addEventListener('click', (e) => {
         } catch (e) {
             console.error(e);
             statusEl.textContent = "";
-            alert("Erro no crosscheck.");
+            uiAlert("Erro no crosscheck.");
         }
     }
 
     function exportCrosscheck() {
-        if(!lastCrossRows || !lastCrossRows.length) return alert("Sem dados para exportar. Corre primeiro o RUN.");
+        if(!lastCrossRows || !lastCrossRows.length) return uiAlert("Sem dados para exportar. Corre primeiro o RUN.");
         const out = lastCrossRows.map(r => ({
             ID: r.id,
             Packed_At: r.packedAt,
@@ -1148,9 +1371,9 @@ function handleScan(v, mode) {
 
         // Guard: allow viewing old/COMPLETED batches, but block writing packing records
         if(m === 'PACKING' && activeBatchData && activeBatchData.status && activeBatchData.status !== 'READY_TO_PACK') {
-            return alert("Este lote está fechado (COMPLETED) ou ainda não está pronto para packing.");
+            return uiAlert("Este lote está fechado (COMPLETED) ou ainda não está pronto para packing.");
         }
-        if(!scanData.id || !scanData.track) return alert("Faltam dados!");
+        if(!scanData.id || !scanData.track) return uiAlert("Faltam dados!");
 
         const endTime = _nowTime();
         const endTs = Date.now();
@@ -1197,7 +1420,7 @@ function handleScan(v, mode) {
             });
 
             resetScan(); 
-        } catch (e) { alert("Erro ao gravar."); }
+        } catch (e) { uiAlert("Erro ao gravar."); }
     }
 
     function resetScan() {
@@ -1475,13 +1698,13 @@ function _parseIds(raw) {
     }
 
     function exportIdHistory() {
-        if (!searchCache.activeId) return alert("No active ID.");
+        if (!searchCache.activeId) return uiAlert("No active ID.");
         exportIdHistoryDirect(searchCache.activeId);
     }
 
     function exportIdHistoryDirect(id) {
         var events = searchCache.eventsById[id] || [];
-        if (!events.length) return alert("No history to export for this ID.");
+        if (!events.length) return uiAlert("No history to export for this ID.");
         var ws = XLSX.utils.json_to_sheet(events);
         var wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "ID_History");
@@ -1490,7 +1713,7 @@ function _parseIds(raw) {
     }
 
     function exportAllSearchHistories() {
-        if (!searchCache.ids || searchCache.ids.length === 0) return alert("No IDs.");
+        if (!searchCache.ids || searchCache.ids.length === 0) return uiAlert("No IDs.");
         var all = [];
         searchCache.ids.forEach(function(id){
             var evs = searchCache.eventsById[id] || [];
@@ -1508,7 +1731,7 @@ function _parseIds(raw) {
                 all.push(row);
             });
         });
-        if (!all.length) return alert("No history to export.");
+        if (!all.length) return uiAlert("No history to export.");
         var ws = XLSX.utils.json_to_sheet(all);
         var wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Search_All");
@@ -1519,7 +1742,7 @@ function _parseIds(raw) {
     async function searchOrderHistory() {
         var inputEl = document.getElementById('search-ids-input');
         var input = inputEl ? inputEl.value : "";
-        if(!input.trim()) return alert("Enter IDs.");
+        if(!input.trim()) return uiAlert("Enter IDs.");
 
         var idsToSearch = _parseIds(input);
         searchCache.ids = idsToSearch;
@@ -1914,11 +2137,11 @@ function loadPerformanceStats() {
             if(!batchId || !sel) return;
 
             if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
-                return alert('Sem permissões para editar transportadora.');
+                return uiAlert('Sem permissões para editar transportadora.');
             }
 
             const newCarrier = String(sel.value || '').trim();
-            if(!newCarrier) return alert('Transportadora inválida.');
+            if(!newCarrier) return uiAlert('Transportadora inválida.');
 
             // read current to avoid useless writes
             const snap = await db.ref('active_batches/' + batchId + '/carrier').once('value');
@@ -1934,7 +2157,7 @@ function loadPerformanceStats() {
         }catch(e){
             console.error(e);
             _setModalCarrierStatus('Erro ao guardar.', false);
-            alert('Erro ao guardar transportadora.');
+            uiAlert('Erro ao guardar transportadora.');
         }
     }
 
@@ -1953,12 +2176,12 @@ function loadPerformanceStats() {
             if(!batchId || !inp) return;
 
             if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
-                return alert('Sem permissões para editar a data.');
+                return uiAlert('Sem permissões para editar a data.');
             }
 
             const newDate = String(inp.value || '').trim();
             if(!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)){
-                return alert('Data inválida. Formato esperado: AAAA-MM-DD');
+                return uiAlert('Data inválida. Formato esperado: AAAA-MM-DD');
             }
 
             // Read current date to avoid useless writes
@@ -1981,7 +2204,7 @@ function loadPerformanceStats() {
         }catch(e){
             console.error(e);
             _setModalDateStatus('Erro ao guardar.', false);
-            alert('Erro ao guardar data.');
+            uiAlert('Erro ao guardar data.');
         }
     }
     window.saveBatchDateFromModal = saveBatchDateFromModal;
@@ -2004,11 +2227,11 @@ function loadPerformanceStats() {
             if(!batchId || !inp) return;
 
             if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
-                return alert('Sem permissões para editar o nome.');
+                return uiAlert('Sem permissões para editar o nome.');
             }
 
             const newName = String(inp.value || '').trim();
-            if(!newName) return alert('Nome inválido.');
+            if(!newName) return uiAlert('Nome inválido.');
 
             const snap = await db.ref('active_batches/' + batchId + '/name').once('value');
             const prev = snap.val() || '';
@@ -2027,7 +2250,7 @@ function loadPerformanceStats() {
         }catch(e){
             console.error(e);
             _setModalNameStatus('Erro ao guardar.', false);
-            alert('Erro ao guardar nome do lote.');
+            uiAlert('Erro ao guardar nome do lote.');
         }
     }
     window.saveBatchNameFromModal = saveBatchNameFromModal;
@@ -2038,17 +2261,17 @@ function loadPerformanceStats() {
     async function deleteBatchId(batchId, orderId){
         try{
             if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
-                return alert('Sem permissões para eliminar IDs.');
+                return uiAlert('Sem permissões para eliminar IDs.');
             }
 
             const batchSnap = await db.ref('active_batches/' + batchId).once('value');
             const batch = batchSnap.val() || {};
             const alreadyPacked = !!(batch.processed_ids && batch.processed_ids[orderId]);
             if(alreadyPacked){
-                return alert('Este ID já foi picado pelo operador e já não pode ser eliminado. Pode ser cancelado a qualquer momento.');
+                return uiAlert('Este ID já foi picado pelo operador e já não pode ser eliminado. Pode ser cancelado a qualquer momento.');
             }
 
-            if(!confirm(`ELIMINAR o ID ${orderId} do lote?
+            if(!await uiConfirm(`ELIMINAR o ID ${orderId} do lote?
 
 Esta ação remove o ID definitivamente da lista do lote.
 Se apenas quiser bloquear, use CANCELAR.`)) return;
@@ -2084,10 +2307,10 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
                 });
             }catch(err){ console.warn('deleteBatchId pushIdHistory error', err); }
 
-            alert(`ID ${orderId} eliminado do lote.`);
+            uiAlert(`ID ${orderId} eliminado do lote.`);
         }catch(e){
             console.error(e);
-            alert('Erro ao eliminar o ID.');
+            uiAlert('Erro ao eliminar o ID.');
         }
     }
     window.deleteBatchId = deleteBatchId;
@@ -2098,7 +2321,7 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
     async function editOrderField(batchId, orderId, field, currentValue){
         try{
             if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
-                return alert('Sem permissões para editar.');
+                return uiAlert('Sem permissões para editar.');
             }
 
             const snapCheck = await db.ref('active_batches/' + batchId).once('value');
@@ -2106,7 +2329,7 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
 
             const alreadyPacked = !!(batchCheck.processed_ids && batchCheck.processed_ids[orderId]);
             if (alreadyPacked) {
-                return alert('Este ID já foi picado pelo operador e já não pode ser editado em Order Mapping.');
+                return uiAlert('Este ID já foi picado pelo operador e já não pode ser editado em Order Mapping.');
             }
 
             const fieldLabels = { id: 'ID da encomenda', name: 'Nome do cliente', content: 'Conteúdo' };
@@ -2118,10 +2341,10 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
                 currentValue = stored[field] || '';
             }
             const label = fieldLabels[field] || field;
-            const newValue = prompt(`Editar ${label}:\n(valor atual: ${currentValue || 'N/A'})`, currentValue || '');
+            const newValue = await uiPrompt(`Editar ${label}:\n(valor atual: ${currentValue || 'N/A'})`, currentValue || '');
             if(newValue === null) return; // cancelled
             const trimmed = String(newValue).trim();
-            if(!trimmed) return alert('Valor inválido (não pode estar vazio).');
+            if(!trimmed) return uiAlert('Valor inválido (não pode estar vazio).');
             if(trimmed === String(currentValue).trim()) return; // no change
 
             if(field === 'id'){
@@ -2130,7 +2353,7 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
 
                 const ids = Array.isArray(b.expected_ids) ? [...b.expected_ids] : [];
                 const idx = ids.indexOf(orderId);
-                if(idx === -1) return alert('ID não encontrado no lote.');
+                if(idx === -1) return uiAlert('ID não encontrado no lote.');
                 ids[idx] = trimmed;
 
                 const updates = {};
@@ -2163,7 +2386,7 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
 
         }catch(e){
             console.error(e);
-            alert('Erro ao guardar alteração: ' + e.message);
+            uiAlert('Erro ao guardar alteração: ' + e.message);
         }
     }
     window.editOrderField = editOrderField;
@@ -2210,26 +2433,26 @@ function logBatchAction(bId, msg) {
             const newQty = parseInt(newQtyVal, 10);
             const prevQty = parseInt(oldQty, 10);
 
-            if (isNaN(newQty)) return alert("Quantidade inválida.");
-            if (newQty < 0) return alert("Quantidade não pode ser negativa.");
+            if (isNaN(newQty)) return uiAlert("Quantidade inválida.");
+            if (newQty < 0) return uiAlert("Quantidade não pode ser negativa.");
             if (newQty === prevQty) return;
 
             await db.ref(`active_batches/${batchId}/inventory/${skuKey}/q`).set(newQty);
             logBatchAction(batchId, `INV QTY UPDATE: ${skuKey} | ${prevQty} -> ${newQty}`);
         } catch (e) {
             console.error(e);
-            alert("Erro ao atualizar quantidade.");
+            uiAlert("Erro ao atualizar quantidade.");
         }
     }
 
     async function removeInventoryItem(batchId, skuKey, oldQty) {
         try {
-            if (!confirm(`Remover o produto ${skuKey} do inventário?`)) return;
+            if (!await uiConfirm(`Remover o produto ${skuKey} do inventário?`)) return;
             await db.ref(`active_batches/${batchId}/inventory/${skuKey}`).remove();
             logBatchAction(batchId, `INV ITEM REMOVED: ${skuKey} | was ${oldQty}`);
         } catch (e) {
             console.error(e);
-            alert("Erro ao remover produto.");
+            uiAlert("Erro ao remover produto.");
         }
     }
 
@@ -2405,9 +2628,14 @@ if(metaEl){
         __offProcessedRef.on('value', __offProcessedCb);
     }
 
-    function removeRecentScan(recId, orderId, itemsStr, bId) { if(!confirm(`Apagar registo do ID ${orderId}?`)) return; db.ref('registos/' + recId).remove().then(() => { if(bId) db.ref(`active_batches/${bId}/processed_ids/${orderId}`).remove(); }); }
+    async function removeRecentScan(recId, orderId, itemsStr, bId) {
+        if (!await uiConfirm(`Apagar registo do ID ${orderId}?`)) return;
+        db.ref('registos/' + recId).remove().then(() => {
+            if (bId) db.ref(`active_batches/${bId}/processed_ids/${orderId}`).remove();
+        });
+    }
 
-    function finishBatchPacking() {
+    async function finishBatchPacking() {
         if(!activeBatchData) return;
 
         const requiredIds = getRequiredBatchIds(activeBatchData);
@@ -2421,11 +2649,11 @@ if(metaEl){
             // show up to 10 missing to avoid huge alerts
             const sample = missing.slice(0, 10).join(', ');
             const more = missing.length > 10 ? ` (+${missing.length - 10} more)` : '';
-            return alert(`ERRO: Faltam ${requiredCount - processedRequiredCount} IDs (excluindo cancelados).
+            return uiAlert(`ERRO: Faltam ${requiredCount - processedRequiredCount} IDs (excluindo cancelados).
 Missing: ${sample}${more}`);
         }
 
-        if(confirm("Fechar lote permanentemente? (IDs cancelados não bloqueiam)")) {
+        if(await uiConfirm("Fechar lote permanentemente? (IDs cancelados não bloqueiam)")) {
             db.ref(activeBatchPath).update({status: 'COMPLETED'}).then(() => {
                 localStorage.removeItem('lastPackingBatch');
                 location.reload();
@@ -2474,7 +2702,7 @@ Missing: ${sample}${more}`);
     if(!bId) return;
 
     if(!currentUser || !currentUser.email) {
-        return alert("ERRO: utilizador não autenticado.");
+        return uiAlert("ERRO: utilizador não autenticado.");
     }
 
     const pickedBy = currentUser.email.split('@')[0].toUpperCase();
@@ -2518,7 +2746,7 @@ Missing: ${sample}${more}`);
     .then(() => location.reload())
     .catch(err => {
         console.error(err);
-        alert("Erro ao finalizar picking. Ver consola.");
+        uiAlert("Erro ao finalizar picking. Ver consola.");
     });
 }
     let _overviewFilterMode = 'ALL';
@@ -2588,96 +2816,127 @@ Missing: ${sample}${more}`);
         syncGlobalData();
     }
 
+    
+    function getCarrierColor(carrierName) {
+        const carrier = String(carrierName || '').toUpperCase();
+        if (carrier.includes('CTT')) return 'var(--color-ctt)';
+        if (carrier.includes('NACEX')) return 'var(--color-nacex)';
+        return 'var(--color-correos)';
+    }
+
+    function renderOverviewEmptyState(container, filterMode, fD) {
+        container.innerHTML = `
+            <div class="card overview-empty-card">
+                <h3 style="margin-top:0;">Sem resultados</h3>
+                <div style="color:#666;">Não existem lotes para <b>${_escapeHtml(_getOverviewFilterLabel(filterMode))}</b> em ${_escapeHtml(fD)}.</div>
+                ${filterMode !== 'ALL' ? '<button class="btn-small overview-empty-action" onclick="clearOverviewFilter()">VER TUDO</button>' : ''}
+            </div>`;
+    }
+
+    function renderCarrierHeaderHTML(carrierName, agg, color) {
+        const pending = Math.max(0, Number((agg && agg.tot) || 0) - Number((agg && agg.done) || 0));
+        return `
+            <div class="carrier-header" style="background:${color}">
+                <div class="carrier-header-title">${_escapeHtml(carrierName)}</div>
+                <div class="carrier-header-meta">
+                    BATCHES: ${Number((agg && agg.batches) || 0)} &nbsp;|&nbsp; TOTAL: ${Number((agg && agg.tot) || 0)} &nbsp;|&nbsp; DONE: ${Number((agg && agg.done) || 0)} &nbsp;|&nbsp; PEND: ${pending}
+                </div>
+            </div>`;
+    }
+
+    function renderBatchCardHTML(batch, stats, filterMode) {
+        const total = Number((stats && stats.total) || 0);
+        const done = Number((stats && stats.done) || 0);
+        const pending = Number((stats && stats.pending) || 0);
+        const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+
+        let leftInfo = `${percent}% Done`;
+        if (filterMode === 'PENDING_PACKING') leftInfo = `Pending: ${pending}`;
+        if (filterMode === 'PACKED_TODAY') leftInfo = `Packed: ${done}`;
+        if (filterMode === 'READY_TO_PICK') leftInfo = `To Pick: ${total}`;
+
+        const pickedMeta = batch.pickedBy
+            ? `<div class="batch-picked-meta"><b>Picked by:</b> ${_escapeHtml(batch.pickedBy)}${batch.pickedAt ? ` <span class="batch-picked-at">@ ${_escapeHtml(batch.pickedAt)}</span>` : ''}</div>`
+            : '';
+
+        return `
+            <div class="batch-card">
+                <h4>${_escapeHtml(batch.name || batch.id || 'Sem nome')}</h4>
+                <div class="batch-card-header">
+                    <span>${_escapeHtml(leftInfo)}</span>
+                    <span>Status: ${_escapeHtml(batch.status || 'N/A')}</span>
+                </div>
+                ${pickedMeta}
+                <div class="progress-container"><div class="progress-bar" style="width:${percent}%"></div></div>
+                <div class="batch-action-row">
+                    <button class="btn-small btn-accent-fill" onclick="openEditModal('${_escapeHtml(batch.id)}', false)">EDIT</button>
+                    <button class="btn-small btn-delete" onclick="deleteBatch('${_escapeHtml(batch.id)}')">DEL</button>
+                </div>
+            </div>`;
+    }
+
     function renderManagementUI(all, fD) {
         const container = document.getElementById('mgmt-container');
-        if(!container) return;
-        container.innerHTML = "";
+        if (!container) return;
+        container.innerHTML = '';
         _updateOverviewFilterUI();
 
         const filterMode = _overviewFilterMode || 'ALL';
+        const groupedByCarrier = {};
 
-        // Group filtered batches by carrier for the selected day
-        let gr = {};
-        for (let k in all) {
-            let b = all[k];
-            if (!(b && b.dateClean === fD)) continue;
+        Object.keys(all || {}).forEach(function(batchId) {
+            const batch = all[batchId];
+            if (!(batch && batch.dateClean === fD)) return;
 
-            const stats = _getBatchProgressInfo(b);
-            if(!_batchMatchesOverviewFilter(b, filterMode, stats)) continue;
+            const stats = _getBatchProgressInfo(batch);
+            if (!_batchMatchesOverviewFilter(batch, filterMode, stats)) return;
 
-            const carrierKey = b.carrier || 'SEM TRANSPORTADORA';
-            if (!gr[carrierKey]) gr[carrierKey] = [];
-            gr[carrierKey].push({ ...b, id: k, __stats: stats });
-        }
+            const carrierKey = batch.carrier || 'SEM TRANSPORTADORA';
+            if (!groupedByCarrier[carrierKey]) groupedByCarrier[carrierKey] = [];
+            groupedByCarrier[carrierKey].push(Object.assign({}, batch, { id: batchId, __stats: stats }));
+        });
 
-        const carriers = Object.keys(gr).sort();
-        if(!carriers.length) {
-            container.innerHTML = `
-                <div class="card" style="min-width:420px;">
-                    <h3 style="margin-top:0;">Sem resultados</h3>
-                    <div style="color:#666;">Não existem lotes para <b>${_getOverviewFilterLabel(filterMode)}</b> em ${fD}.</div>
-                    ${filterMode !== 'ALL' ? '<button class="btn-small" style="background:var(--accent); margin-top:15px; padding:12px 18px;" onclick="clearOverviewFilter()">VER TUDO</button>' : ''}
-                </div>`;
+        const carriers = Object.keys(groupedByCarrier).sort();
+        if (!carriers.length) {
+            renderOverviewEmptyState(container, filterMode, fD);
             return;
         }
 
-        // Compute per-carrier totals based on the current filter
         const carrierAgg = {};
-        carriers.forEach(c => {
+        carriers.forEach(function(carrierName) {
             const allIds = new Set();
             const doneIds = new Set();
-            (gr[c] || []).forEach(b => {
-                const stats = b.__stats || _getBatchProgressInfo(b);
-                const requiredIds = getRequiredBatchIds(b);
-                requiredIds.forEach(id => {
+            (groupedByCarrier[carrierName] || []).forEach(function(batch) {
+                const requiredIds = getRequiredBatchIds(batch);
+                requiredIds.forEach(function(id) {
                     allIds.add(id);
-                    if (b.processed_ids && b.processed_ids[id]) doneIds.add(id);
+                    if (batch.processed_ids && batch.processed_ids[id]) doneIds.add(id);
                 });
-                b.__stats = stats;
             });
-            carrierAgg[c] = { tot: allIds.size, done: doneIds.size, batches: (gr[c] || []).length };
+            carrierAgg[carrierName] = {
+                tot: allIds.size,
+                done: doneIds.size,
+                batches: (groupedByCarrier[carrierName] || []).length
+            };
         });
 
-        carriers.forEach(c => {
-            let col = document.createElement('div');
-            col.className = 'carrier-column';
-
-            let color = c.includes('CTT') ? 'var(--color-ctt)' : (c.includes('NACEX') ? 'var(--color-nacex)' : 'var(--color-correos)');
-
-            const agg = carrierAgg[c] || { tot: 0, done: 0, batches: 0 };
-            const pend = Math.max(0, agg.tot - agg.done);
-
-            let h = `
-                <div class="carrier-header" style="background:${color}">
-                    <div style="font-weight:900; font-size:16px; line-height:1;">${c}</div>
-                    <div style="font-size:12px; font-weight:800; opacity:.95; margin-top:6px;">
-                        BATCHES: ${agg.batches} &nbsp;|&nbsp; TOTAL: ${agg.tot} &nbsp;|&nbsp; DONE: ${agg.done} &nbsp;|&nbsp; PEND: ${pend}
-                    </div>
-                </div>`;
-
-            (gr[c] || []).sort((a, b) => {
-                const na = (a.name || a.id || '').toUpperCase();
-                const nb = (b.name || b.id || '').toUpperCase();
-                return na.localeCompare(nb);
+        carriers.forEach(function(carrierName) {
+            const column = document.createElement('div');
+            column.className = 'carrier-column';
+            const color = getCarrierColor(carrierName);
+            const batches = (groupedByCarrier[carrierName] || []).sort(function(a, b) {
+                const nameA = String(a.name || a.id || '').toUpperCase();
+                const nameB = String(b.name || b.id || '').toUpperCase();
+                return nameA.localeCompare(nameB);
             });
 
-            (gr[c] || []).forEach(b => {
-                const stats = b.__stats || _getBatchProgressInfo(b);
-                const tot = stats.total;
-                const done = stats.done;
-                const pendLocal = stats.pending;
-                const perc = tot > 0 ? Math.round((done / tot) * 100) : 0;
+            const batchCards = batches.map(function(batch) {
+                const stats = batch.__stats || _getBatchProgressInfo(batch);
+                return renderBatchCardHTML(batch, stats, filterMode);
+            }).join('');
 
-                let leftInfo = `${perc}% Done`;
-                if(filterMode === 'PENDING_PACKING') leftInfo = `Pending: ${pendLocal}`;
-                if(filterMode === 'PACKED_TODAY') leftInfo = `Packed: ${done}`;
-                if(filterMode === 'READY_TO_PICK') leftInfo = `To Pick: ${tot}`;
-
-                h += `<div class="batch-card"><h4>${b.name}</h4><div style="display:flex; justify-content:space-between; font-size:12px; color:#666;"><span>${leftInfo}</span><span>Status: ${b.status}</span></div>${b.pickedBy ? '<div style="margin-top:6px; font-size:12px; color:#444;"><b>Picked by:</b> ' + b.pickedBy + (b.pickedAt ? ' <span style="color:#666;">@ ' + b.pickedAt + '</span>' : '') + '</div>' : ''}<div class="progress-container"><div class="progress-bar" style="width:${perc}%"></div></div><div style="display:flex; gap:10px; margin-top:15px;"><button class="btn-small" style="background:var(--accent); flex:1;" onclick="openEditModal('${b.id}', false)">EDIT</button><button class="btn-small btn-delete" onclick="deleteBatch('${b.id}')">DEL</button></div></div>`;
-            });
-
-            col.innerHTML = h;
-            container.appendChild(col);
+            column.innerHTML = renderCarrierHeaderHTML(carrierName, carrierAgg[carrierName], color) + batchCards;
+            container.appendChild(column);
         });
     }
 
@@ -2716,14 +2975,14 @@ async function addCarrier() {
     try {
         // Optional guard: only admins can edit carriers
         if (!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))) {
-            return alert("Sem permissões para editar transportadoras.");
+            return uiAlert("Sem permissões para editar transportadoras.");
         }
 
         const inp = document.getElementById('new-carrier-input');
         if (!inp) return;
 
         const name = (inp.value || "").trim().toUpperCase();
-        if (!name) return alert("Nome inválido.");
+        if (!name) return uiAlert("Nome inválido.");
 
         const ref = db.ref('config/carriers');
         const snap = await ref.once('value');
@@ -2732,7 +2991,7 @@ async function addCarrier() {
         if (!Array.isArray(carriers)) carriers = Object.values(carriers);
 
         if (carriers.includes(name)) {
-            return alert("Essa transportadora já existe.");
+            return uiAlert("Essa transportadora já existe.");
         }
 
         carriers.push(name);
@@ -2743,7 +3002,7 @@ async function addCarrier() {
         inp.value = "";
     } catch (e) {
         console.error(e);
-        alert("Erro ao adicionar transportadora.");
+        uiAlert("Erro ao adicionar transportadora.");
     }
 }
 
@@ -2751,11 +3010,11 @@ async function removeCarrier(name) {
     try {
         // Optional guard: only admins can edit carriers
         if (!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))) {
-            return alert("Sem permissões para editar transportadoras.");
+            return uiAlert("Sem permissões para editar transportadoras.");
         }
 
         if (!name) return;
-        if (!confirm(`Apagar a transportadora "${name}"?`)) return;
+        if (!await uiConfirm(`Apagar a transportadora "${name}"?`)) return;
 
         const ref = db.ref('config/carriers');
         const snap = await ref.once('value');
@@ -2770,7 +3029,7 @@ async function removeCarrier(name) {
         await ref.set(carriers);
     } catch (e) {
         console.error(e);
-        alert("Erro ao apagar transportadora.");
+        uiAlert("Erro ao apagar transportadora.");
     }
 }
 
@@ -3037,7 +3296,7 @@ function showMetadata(id) {
 
     async function doArchiveBatches() {
         if(!__batchesToArchive.length) return;
-        if(!confirm(`Arquivar ${__batchesToArchive.length} lote(s) COMPLETED? O histórico fica disponível no Search.`)) return;
+        if(!await uiConfirm(`Arquivar ${__batchesToArchive.length} lote(s) COMPLETED? O histórico fica disponível no Search.`)) return;
 
         const btnDo = document.getElementById('btn-do-archive');
         const statusEl = document.getElementById('archive-status');
@@ -3098,7 +3357,7 @@ function showMetadata(id) {
         if(!id) return;
         // Only admins can delete entire batches
         if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
-            return alert('Sem permissões para apagar lotes.');
+            return uiAlert('Sem permissões para apagar lotes.');
         }
 
         // 1) Read the batch (so we can archive its inventory/meta for Inventory undo)
@@ -3138,23 +3397,23 @@ function showMetadata(id) {
         }catch(e){}
     }
 
-    function deleteBatch(id) {
+    async function deleteBatch(id) {
         if(!id) return;
-        if(!confirm("Apagar lote?")) return;
+        if(!await uiConfirm("Apagar lote?")) return;
         archiveAndDeleteBatch(id).catch(err => {
             console.error(err);
-            alert("Erro ao apagar lote.");
+            uiAlert("Erro ao apagar lote.");
         });
     }
 
     // Delete ENTIRE batch from the Batch Details modal
-    function deleteBatchFromModal(){
+    async function deleteBatchFromModal(){
         const id = __editBatchId;
         if(!id) return;
         if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
-            return alert('Sem permissões para apagar lotes.');
+            return uiAlert('Sem permissões para apagar lotes.');
         }
-        if(!confirm("Apagar lote?")) return;
+        if(!await uiConfirm("Apagar lote?")) return;
 
         // Stop realtime listener so modal doesn't try to re-render while deleting
         try{ stopEditBatchListener(); }catch(e){}
@@ -3178,7 +3437,7 @@ function showMetadata(id) {
           })
           .catch(err => {
               console.error(err);
-              alert("Erro ao apagar lote.");
+              uiAlert("Erro ao apagar lote.");
           });
     }
 
@@ -3249,7 +3508,7 @@ function showMetadata(id) {
         });
 
         if(!best){
-            return alert("Não encontrei registo PACKING para este ID neste lote.");
+            return uiAlert("Não encontrei registo PACKING para este ID neste lote.");
         }
 
         packedEditState = {
@@ -3323,7 +3582,7 @@ function showMetadata(id) {
         }
 
         closeModal('edit-packed-items-modal');
-        alert("Correção gravada (ID mantém-se PACKED).");
+        uiAlert("Correção gravada (ID mantém-se PACKED).");
     }
 
 
@@ -3398,7 +3657,7 @@ function closeModal(id) {
   const statusEl  = document.getElementById('master-upload-status');
 
   if(!fileInput || !fileInput.files || !fileInput.files.length){
-    alert("Selecione um ficheiro CSV primeiro.");
+    uiAlert("Selecione um ficheiro CSV primeiro.");
     return;
   }
 
@@ -3452,7 +3711,7 @@ function closeModal(id) {
 
       if(lines.length < 2){
         if(statusEl) statusEl.textContent = "CSV inválido: precisa de cabeçalho + pelo menos 1 linha de dados.";
-        alert("CSV inválido: precisa de cabeçalho + pelo menos 1 linha de dados.");
+        uiAlert("CSV inválido: precisa de cabeçalho + pelo menos 1 linha de dados.");
         return;
       }
 
@@ -3486,7 +3745,7 @@ function closeModal(id) {
       if(total === 0){
         const msg = "Não encontrei barcodes válidos. Confirma: Coluna A=Nome, Coluna B=Barcode, e a linha 1 é cabeçalho.";
         if(statusEl) statusEl.textContent = msg;
-        alert(msg);
+        uiAlert(msg);
         return;
       }
 
@@ -3497,12 +3756,12 @@ function closeModal(id) {
       if(statusEl) statusEl.textContent = "✅ Master Data atualizada ("+total+" barcodes). Linhas ignoradas: "+skipped+".";
       try{ updateMasterPreview(); }catch(err){}
 
-      alert("Master Data carregada com sucesso ("+total+" barcodes).");
+      uiAlert("Master Data carregada com sucesso ("+total+" barcodes).");
       fileInput.value = "";
     }catch(err){
       console.error(err);
       if(statusEl) statusEl.textContent = "Erro no upload: " + (err && err.message ? err.message : err);
-      alert("Erro a processar o CSV: " + (err && err.message ? err.message : err));
+      uiAlert("Erro a processar o CSV: " + (err && err.message ? err.message : err));
     }
   };
   reader.readAsText(fileInput.files[0]);
@@ -3512,7 +3771,7 @@ function closeModal(id) {
         const n = document.getElementById('off-batch-name').value.trim(),
               c = document.getElementById('off-carrier-select').value,
               tD = document.getElementById('off-batch-date').value;
-        if(!n || !tD) return alert("Missing info.");
+        if(!n || !tD) return uiAlert("Missing info.");
 
         const key = safeKey(n + "_" + c + "_" + tD + "_" + Date.now());
 
@@ -3566,7 +3825,7 @@ function closeModal(id) {
             });
         }));
 
-        alert("Created!");
+        uiAlert("Created!");
         document.getElementById('off-batch-name').value="";
         document.getElementById('off-products-list').value="";
         document.getElementById('off-order-meta').value="";
@@ -3876,7 +4135,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var dayEl = document.getElementById('perf-day');
     var opEl = document.getElementById('perf-operator');
     var day = dayEl ? dayEl.value : "";
-    if(!day) return alert("Seleciona um dia.");
+    if(!day) return uiAlert("Seleciona um dia.");
 
     var wrap = document.getElementById('perf-daily-summary');
     if(wrap) wrap.innerHTML = "<div class='card'>A carregar...</div>";
@@ -3906,7 +4165,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 
   function perfRenderHistory(){
     var state = window.__perf_last;
-    if(!state) return alert("Primeiro clica em 'Carregar resumo diário'.");
+    if(!state) return uiAlert("Primeiro clica em 'Carregar resumo diário'.");
     var opEl = document.getElementById('perf-operator');
     var operator = opEl ? opEl.value : "ALL";
     var list = document.getElementById('perf-history-list');
@@ -3917,7 +4176,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 
   function perfExportCSV(){
     var state = window.__perf_last;
-    if(!state) return alert("Primeiro clica em 'Carregar resumo diário'.");
+    if(!state) return uiAlert("Primeiro clica em 'Carregar resumo diário'.");
     var opEl = document.getElementById('perf-operator');
     var operator = opEl ? opEl.value : "ALL";
 
@@ -3981,10 +4240,10 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         try {
             // Permitir cancelar mesmo depois de embalado (PACKED)
             if (wasPacked) {
-                const ok = confirm(`ATENÇÃO: O ID ${orderId} já está PACKED.\n\nSe cancelares, vai ficar marcado como CANCELADO no lote (com motivo), e deixa de contar para finalizar o lote.\nO histórico de packing continua nos registos.\n\nQueres continuar?`);
+                const ok = await uiConfirm(`ATENÇÃO: O ID ${orderId} já está PACKED.\n\nSe cancelares, vai ficar marcado como CANCELADO no lote (com motivo), e deixa de contar para finalizar o lote.\nO histórico de packing continua nos registos.\n\nQueres continuar?`);
                 if (!ok) return;
             }
-            const reason = prompt(`Motivo do cancelamento para o ID ${orderId}?`);
+            const reason = await uiPrompt(`Motivo do cancelamento para o ID ${orderId}?`);
             if (!reason || !reason.trim()) return;
 
             const dc = _nowDateClean();
@@ -4030,10 +4289,10 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
                 console.error("cancelBatchId pushIdHistory error", err);
             }
 
-            alert(`ID ${orderId} cancelado com sucesso.`);
+            uiAlert(`ID ${orderId} cancelado com sucesso.`);
         } catch (e) {
             console.error(e);
-            alert("Erro ao cancelar o ID.");
+            uiAlert("Erro ao cancelar o ID.");
         }
     }
 
@@ -4043,10 +4302,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     }
 
 
-</script>
 
 
-<script>
+
 /* === STRONG PAGE PROFILE GUARD (ADMIN) === */
 (function(){
   var PROFILE = "ADMIN";
@@ -4120,7 +4378,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var _tab = window.tab;
     window.tab = function(id, el){
       if (!isAllowed(id)) {
-        alert("Sem acesso a este separador nesta página.");
+        uiAlert("Sem acesso a este separador nesta página.");
         return;
       }
       return _tab.call(this, id, el);
@@ -4149,10 +4407,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     if (main && main.style.display !== "none") enforce();
   }, 1200);
 })();
-</script>
 
 
-<script>
+
 // ===== ADMIN BADGE =====
 (function(){
   function setAdminBadge(){
@@ -4169,10 +4426,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     setTimeout(setAdminBadge, 800);
   });
 })();
-</script>
 
 
-<script>
+
 // ===== UI TOP BAR + ERROR OVERLAY (robust auth binding) =====
 (function(){
   function ensureErrorOverlay(){
@@ -4239,7 +4495,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         if(window.auth && auth.signOut) return auth.signOut();
         if(window.firebase && firebase.auth) return firebase.auth().signOut();
       }catch(e){
-        alert('Logout failed');
+        uiAlert('Logout failed');
       }
     };
   }
@@ -4316,10 +4572,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     }, 250);
   });
 })();
-</script>
 
 
-<script>
+
 // ===== OVERVIEW-ONLY SUMMARY GUARD =====
 (function(){
   function enforceOverviewOnly(){
@@ -4364,10 +4619,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     window.__overviewTabWrapped = true;
   }
 })();
-</script>
 
 
-<script>
+
 // ===== AFTER LOGIN: ALWAYS OPEN OVERVIEW =====
 (function(){
   function goOverview(){
@@ -4433,10 +4687,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     }, 250);
   });
 })();
-</script>
 
 
-<script>
+
 // ===== MOVE OVERVIEW CARDS INTO OVERVIEW ONLY =====
 (function(){
   function moveCardsIntoOverview(){
@@ -4487,10 +4740,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     window.__tabWrappedForCards = true;
   }
 })();
-</script>
 
 
-<script>
+
 // ===== FIX: CLEAR INLINE DISPLAY ON SECTIONS (prevents Overview leaking into other tabs) =====
 (function(){
   function clearInlineDisplays(){
@@ -4520,10 +4772,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     window.__tabWrappedClearDisplay = true;
   }
 })();
-</script>
 
 
-<script>
+
 // ===== GLOBAL HELPERS (Search needs these) =====
 (function(){
   // minimal formatter if not present
@@ -4555,10 +4806,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     window._splitProductsField = _splitProductsFieldImpl;
   }
 })();
-</script>
 
 
-<script>
+
 // ===== MASTER DATA UI WIRING (movido de script src inválido) =====
 document.addEventListener('DOMContentLoaded', function(){
   var ms = document.getElementById('master-search');
@@ -4590,7 +4840,7 @@ function exportMasterDB(){
     a.click();
     document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-  }catch(e){ console.error(e); alert("Erro ao exportar."); }
+  }catch(e){ console.error(e); uiAlert("Erro ao exportar."); }
 }
 window.exportMasterDB = exportMasterDB;
 </script>
