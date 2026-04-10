@@ -111,6 +111,19 @@
             </div>
         </div>
 
+        <!-- DATE EDIT (ADMIN) -->
+        <div id="modal-date-row" style="display:none; margin: 10px 0 20px 0; padding: 14px 16px; border: 1px solid #e5e7eb; border-radius: 14px; background: #f8fafc;">
+            <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:220px;">
+                    <label style="font-weight:900; font-size:12px; color:#475569;">📅 Data do Lote</label>
+                    <input type="date" id="modal-date-input" style="height:52px; font-size:15px;">
+                    <div style="font-size:12px; color:#64748b; margin-top:6px;">Mudar aqui altera a data de envio do lote no OVERVIEW e nos exports.</div>
+                </div>
+                <button class="btn-small" style="background: var(--accent); padding: 14px 18px; font-size: 14px; height:52px;" onclick="saveBatchDateFromModal()">GUARDAR</button>
+                <div id="modal-date-status" style="display:none; font-size:12px; color:#0f766e; font-weight:900;"></div>
+            </div>
+        </div>
+
         <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:30px;">
             <div>
                 <h4>📦 Inventory Status</h4>
@@ -1818,6 +1831,14 @@ function loadPerformanceStats() {
 
             // show row for admins (edit) and also for readOnly? keep hidden for non-admin to avoid confusion
             row.style.display = (canEdit) ? 'block' : 'none';
+
+            // DATE ROW — always show/hide together with carrier row
+            const dateRow = document.getElementById('modal-date-row');
+            const dateInput = document.getElementById('modal-date-input');
+            if(dateRow) dateRow.style.display = (canEdit) ? 'block' : 'none';
+            if(dateInput && batchObj && batchObj.dateClean) dateInput.value = batchObj.dateClean;
+            _setModalDateStatus('');
+
             if(!canEdit) return;
 
             // build options from config; fallback defaults
@@ -1870,6 +1891,54 @@ function loadPerformanceStats() {
             alert('Erro ao guardar transportadora.');
         }
     }
+
+    function _setModalDateStatus(msg, ok=true){
+        const el = document.getElementById('modal-date-status');
+        if(!el) return;
+        el.style.display = msg ? 'block' : 'none';
+        el.style.color = ok ? '#0f766e' : '#b91c1c';
+        el.textContent = msg || '';
+    }
+
+    async function saveBatchDateFromModal(){
+        try{
+            const batchId = __editBatchId;
+            const inp = document.getElementById('modal-date-input');
+            if(!batchId || !inp) return;
+
+            if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+                return alert('Sem permissões para editar a data.');
+            }
+
+            const newDate = String(inp.value || '').trim();
+            if(!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)){
+                return alert('Data inválida. Formato esperado: AAAA-MM-DD');
+            }
+
+            // Read current date to avoid useless writes
+            const snap = await db.ref('active_batches/' + batchId + '/dateClean').once('value');
+            const prev = snap.val() || '';
+            if(String(prev) === newDate){
+                _setModalDateStatus('Sem alterações (já era ' + newDate + ').', true);
+                return;
+            }
+
+            await db.ref('active_batches/' + batchId + '/dateClean').set(newDate);
+            logBatchAction(batchId, 'DATE UPDATE: ' + (prev || 'N/A') + ' -> ' + newDate);
+            _setModalDateStatus('✅ Data guardada: ' + newDate);
+
+            // Invalidar cache do overview para que a nova data apareça
+            if(typeof _archivedByDateCache !== 'undefined'){
+                delete _archivedByDateCache[prev];
+                delete _archivedByDateCache[newDate];
+            }
+        }catch(e){
+            console.error(e);
+            _setModalDateStatus('Erro ao guardar.', false);
+            alert('Erro ao guardar data.');
+        }
+    }
+    window.saveBatchDateFromModal = saveBatchDateFromModal;
 
 function logBatchAction(bId, msg) {
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
