@@ -98,42 +98,44 @@
         <div id="edit-batch-meta" style="margin-top:10px; font-size:14px; color:#444;"></div>
         <hr style="margin:25px 0;">
 
-        <!-- CARRIER EDIT (ADMIN) -->
-        <div id="modal-carrier-row" style="display:none; margin: 10px 0 20px 0; padding: 14px 16px; border: 1px solid #e5e7eb; border-radius: 14px; background: #f8fafc;">
-            <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:220px;">
-                    <label style="font-weight:900; font-size:12px; color:#475569;">🚚 Transportadora do Lote</label>
-                    <select id="modal-carrier-select" style="height:52px;"></select>
-                    <div style="font-size:12px; color:#64748b; margin-top:6px;">Mudar aqui altera a coluna do OVERVIEW e o carrier nos exports (para este lote).</div>
-                </div>
-                <button id="modal-carrier-save" class="btn-small" style="background: var(--accent); padding: 14px 18px; font-size: 14px; height:52px;" onclick="saveBatchCarrierFromModal()">GUARDAR</button>
-                <div id="modal-carrier-status" style="display:none; font-size:12px; color:#0f766e; font-weight:900;"></div>
-            </div>
-        </div>
+        <!-- ADMIN EDIT ROW (COMPACT HORIZONTAL) -->
+        <div id="modal-admin-edit-row" style="display:none; margin: 10px 0 18px 0; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 14px; background: #f8fafc;">
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
 
-        <!-- DATE EDIT (ADMIN) -->
-        <div id="modal-date-row" style="display:none; margin: 10px 0 20px 0; padding: 14px 16px; border: 1px solid #e5e7eb; border-radius: 14px; background: #f8fafc;">
-            <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:220px;">
-                    <label style="font-weight:900; font-size:12px; color:#475569;">📅 Data do Lote</label>
-                    <input type="date" id="modal-date-input" style="height:52px; font-size:15px;">
-                    <div style="font-size:12px; color:#64748b; margin-top:6px;">Mudar aqui altera a data de envio do lote no OVERVIEW e nos exports.</div>
+                <!-- CARRIER -->
+                <div id="modal-carrier-row" style="flex:1; min-width:180px;">
+                    <label style="font-weight:900; font-size:11px; color:#475569;">🚚 Transportadora</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <select id="modal-carrier-select" style="height:42px; font-size:14px; flex:1; margin:4px 0;"></select>
+                        <button id="modal-carrier-save" class="btn-small" style="background:var(--accent); padding:10px 14px; height:42px; white-space:nowrap;" onclick="saveBatchCarrierFromModal()">GUARDAR</button>
+                    </div>
+                    <div id="modal-carrier-status" style="display:none; font-size:11px; color:#0f766e; font-weight:900; margin-top:2px;"></div>
                 </div>
-                <button class="btn-small" style="background: var(--accent); padding: 14px 18px; font-size: 14px; height:52px;" onclick="saveBatchDateFromModal()">GUARDAR</button>
-                <div id="modal-date-status" style="display:none; font-size:12px; color:#0f766e; font-weight:900;"></div>
-            </div>
-        </div>
 
-        <!-- NAME EDIT (ADMIN) -->
-        <div id="modal-name-row" style="display:none; margin: 10px 0 20px 0; padding: 14px 16px; border: 1px solid #e5e7eb; border-radius: 14px; background: #f8fafc;">
-            <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:220px;">
-                    <label style="font-weight:900; font-size:12px; color:#475569;">✏️ Nome do Lote</label>
-                    <input type="text" id="modal-name-input" style="height:52px; font-size:15px;" placeholder="Novo nome do lote...">
-                    <div style="font-size:12px; color:#64748b; margin-top:6px;">Mudar o nome do lote (visível no OVERVIEW, selects e exports).</div>
+                <div style="width:1px; background:#e5e7eb; align-self:stretch; margin:0 4px;"></div>
+
+                <!-- DATE -->
+                <div id="modal-date-row" style="flex:1; min-width:180px;">
+                    <label style="font-weight:900; font-size:11px; color:#475569;">📅 Data do Lote</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="date" id="modal-date-input" style="height:42px; font-size:14px; flex:1; margin:4px 0;">
+                        <button class="btn-small" style="background:var(--accent); padding:10px 14px; height:42px; white-space:nowrap;" onclick="saveBatchDateFromModal()">GUARDAR</button>
+                    </div>
+                    <div id="modal-date-status" style="display:none; font-size:11px; color:#0f766e; font-weight:900; margin-top:2px;"></div>
                 </div>
-                <button class="btn-small" style="background: var(--accent); padding: 14px 18px; font-size: 14px; height:52px;" onclick="saveBatchNameFromModal()">GUARDAR</button>
-                <div id="modal-name-status" style="display:none; font-size:12px; color:#0f766e; font-weight:900;"></div>
+
+                <div style="width:1px; background:#e5e7eb; align-self:stretch; margin:0 4px;"></div>
+
+                <!-- NAME -->
+                <div id="modal-name-row" style="flex:2; min-width:220px;">
+                    <label style="font-weight:900; font-size:11px; color:#475569;">✏️ Nome do Lote</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="text" id="modal-name-input" style="height:42px; font-size:14px; flex:1; margin:4px 0;" placeholder="Novo nome do lote...">
+                        <button class="btn-small" style="background:var(--accent); padding:10px 14px; height:42px; white-space:nowrap;" onclick="saveBatchNameFromModal()">GUARDAR</button>
+                    </div>
+                    <div id="modal-name-status" style="display:none; font-size:11px; color:#0f766e; font-weight:900; margin-top:2px;"></div>
+                </div>
+
             </div>
         </div>
 
@@ -1834,34 +1836,29 @@ function loadPerformanceStats() {
     function renderBatchCarrierControls(batchId, batchObj, readOnly){
         try{
             __modalBatchId_forCarrier = batchId || null;
-            const row = document.getElementById('modal-carrier-row');
+            const adminRow = document.getElementById('modal-admin-edit-row');
             const sel = document.getElementById('modal-carrier-select');
-            const btn = document.getElementById('modal-carrier-save');
-            if(!row || !sel || !btn) return;
+            if(!sel) return;
 
-            // only admins can change carrier
+            // only admins can change carrier/date/name
             const canEdit = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
 
-            // show row for admins (edit) and also for readOnly? keep hidden for non-admin to avoid confusion
-            row.style.display = (canEdit) ? 'block' : 'none';
+            // Show/hide the entire combined admin row
+            if(adminRow) adminRow.style.display = canEdit ? 'block' : 'none';
 
-            // DATE ROW — always show/hide together with carrier row
-            const dateRow = document.getElementById('modal-date-row');
+            // DATE
             const dateInput = document.getElementById('modal-date-input');
-            if(dateRow) dateRow.style.display = (canEdit) ? 'block' : 'none';
             if(dateInput && batchObj && batchObj.dateClean) dateInput.value = batchObj.dateClean;
             _setModalDateStatus('');
 
-            // NAME ROW
-            const nameRow = document.getElementById('modal-name-row');
+            // NAME
             const nameInput = document.getElementById('modal-name-input');
-            if(nameRow) nameRow.style.display = (canEdit) ? 'block' : 'none';
             if(nameInput && batchObj && batchObj.name) nameInput.value = batchObj.name;
             try{ _setModalNameStatus(''); }catch(_){}
 
             if(!canEdit) return;
 
-            // build options from config; fallback defaults
+            // build carrier options from config; fallback defaults
             const list = (Array.isArray(_carriersList) && _carriersList.length) ? _carriersList : ['CTT','NACEX','CORREOS'];
             const current = (batchObj && batchObj.carrier) ? String(batchObj.carrier) : '';
 
@@ -2058,6 +2055,75 @@ function loadPerformanceStats() {
     }
     window.deleteBatchId = deleteBatchId;
 
+    // ================================
+    // ✏️ EDIT ORDER DETAIL (id, name, content) no Order Mapping
+    // ================================
+    async function editOrderField(batchId, orderId, field, currentValue){
+        try{
+            if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+                return alert('Sem permissões para editar.');
+            }
+
+            const fieldLabels = { id: 'ID da encomenda', name: 'Nome do cliente', content: 'Conteúdo' };
+
+            // For name/content, read from the safe store to avoid any HTML-escaping issues
+            if(field !== 'id'){
+                const storeKey = batchId + '||' + orderId;
+                const stored = (window._orderEditStore && window._orderEditStore[storeKey]) ? window._orderEditStore[storeKey] : {};
+                currentValue = stored[field] || '';
+            }
+            const label = fieldLabels[field] || field;
+            const newValue = prompt(`Editar ${label}:\n(valor atual: ${currentValue || 'N/A'})`, currentValue || '');
+            if(newValue === null) return; // cancelled
+            const trimmed = String(newValue).trim();
+            if(!trimmed) return alert('Valor inválido (não pode estar vazio).');
+            if(trimmed === String(currentValue).trim()) return; // no change
+
+            if(field === 'id'){
+                // Renaming the ID: update expected_ids array + move order_details + move processed/cancelled keys
+                const snap = await db.ref('active_batches/' + batchId).once('value');
+                const b = snap.val() || {};
+
+                const ids = Array.isArray(b.expected_ids) ? [...b.expected_ids] : [];
+                const idx = ids.indexOf(orderId);
+                if(idx === -1) return alert('ID não encontrado no lote.');
+                ids[idx] = trimmed;
+
+                const updates = {};
+                updates[`active_batches/${batchId}/expected_ids`] = ids;
+
+                // Move order_details
+                const det = (b.order_details || {})[orderId] || {};
+                updates[`active_batches/${batchId}/order_details/${orderId}`] = null;
+                updates[`active_batches/${batchId}/order_details/${trimmed}`] = det;
+
+                // Move processed_ids if exists
+                if(b.processed_ids && b.processed_ids[orderId] !== undefined){
+                    updates[`active_batches/${batchId}/processed_ids/${trimmed}`] = b.processed_ids[orderId];
+                    updates[`active_batches/${batchId}/processed_ids/${orderId}`] = null;
+                }
+                // Move cancelled_ids if exists
+                if(b.cancelled_ids && b.cancelled_ids[orderId] !== undefined){
+                    updates[`active_batches/${batchId}/cancelled_ids/${trimmed}`] = b.cancelled_ids[orderId];
+                    updates[`active_batches/${batchId}/cancelled_ids/${orderId}`] = null;
+                }
+
+                await db.ref('/').update(updates);
+                logBatchAction(batchId, `ID RENAME: "${orderId}" -> "${trimmed}"`);
+
+            } else {
+                // name or content — just update order_details
+                await db.ref(`active_batches/${batchId}/order_details/${orderId}/${field}`).set(trimmed);
+                logBatchAction(batchId, `ORDER DETAIL UPDATE [${orderId}] ${field}: "${currentValue}" -> "${trimmed}"`);
+            }
+
+        }catch(e){
+            console.error(e);
+            alert('Erro ao guardar alteração: ' + e.message);
+        }
+    }
+    window.editOrderField = editOrderField;
+
 function logBatchAction(bId, msg) {
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
         return db.ref(`active_batches/${bId}/history`).push({ time: _nowDateTime(), user: uname, msg });
@@ -2179,24 +2245,38 @@ if(metaEl){
                 tbody.innerHTML += `<tr><td>${k}</td><td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInventoryQty('${batchId}', '${k}', ${it.q}, this.value)">`}</td><td>${it.pos}</td>${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="removeInventoryItem('${batchId}', '${k}', ${it.q})">X</button></td>`}</tr>`;
             });
             const idsList = document.getElementById('edit-ids-list');
+            // Store order detail values safely, keyed by index, to avoid any quoting issues in onclick HTML
+            window._orderEditStore = {};
             let html = '<table><thead><tr><th>ID</th><th>Cliente</th><th>Content</th><th>Status</th><th>Ação</th></tr></thead><tbody>';
-            (b.expected_ids||[]).forEach(id => {
+            (b.expected_ids||[]).forEach((id, _oidx) => {
                 const isPack = (b.processed_ids && b.processed_ids[id]);
                 const isCancelled = (b.cancelled_ids && b.cancelled_ids[id]);
                 const det = (b.order_details||{})[id] || {name:"N/A", content:"N/A"};
                 const cancelInfo = isCancelled ? b.cancelled_ids[id] : null;
 
+                const canEdit = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
+
+                // Store values safely — no risk of quote breakage in HTML
+                const storeKey = batchId + '||' + id;
+                window._orderEditStore[storeKey] = { name: det.name || '', content: det.content || '' };
+
                 const idCell = isCancelled
                     ? `<span style="color:#b91c1c; text-decoration:line-through; font-weight:900;">${id}</span>`
-                    : `<b>${id}</b>`;
+                    : (canEdit
+                        ? `<span style="display:flex;align-items:center;gap:4px;"><b>${id}</b><button class="btn-small" style="background:#64748b;padding:3px 7px;font-size:10px;" onclick="editOrderField('${batchId}','${id}','id','${id}')">✏️</button></span>`
+                        : `<b>${id}</b>`);
 
                 const nameCell = isCancelled
                     ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.name || 'N/A'}</span>`
-                    : `${det.name || 'N/A'}`;
+                    : (canEdit
+                        ? `<span style="display:flex;align-items:center;gap:4px;">${det.name || 'N/A'}<button class="btn-small" style="background:#64748b;padding:3px 7px;font-size:10px;" onclick="editOrderField('${batchId}','${id}','name')">✏️</button></span>`
+                        : `${det.name || 'N/A'}`);
 
                 const contentCell = isCancelled
                     ? `<span style="color:#b91c1c; text-decoration:line-through;">${det.content || 'N/A'}</span>`
-                    : `${det.content || 'N/A'}`;
+                    : (canEdit
+                        ? `<span style="display:flex;align-items:center;gap:4px;">${det.content || 'N/A'}<button class="btn-small" style="background:#64748b;padding:3px 7px;font-size:10px;" onclick="editOrderField('${batchId}','${id}','content')">✏️</button></span>`
+                        : `${det.content || 'N/A'}`);
 
                 let statusTxt = 'PENDING';
                 if (isPack) statusTxt = 'PACKED';
@@ -2206,10 +2286,9 @@ if(metaEl){
                     ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span><div style="font-size:12px; color:#991b1b; margin-top:4px;">${(cancelInfo && cancelInfo.reason) ? ('Motivo: ' + cancelInfo.reason) : ''}</div>`
                     : (isPack ? '<span style="color:#166534; font-weight:900;">PACKED</span>' : '<span style="color:#92400e; font-weight:900;">PENDING</span>');
 
-                const canCancel = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
                 const actionCell = isCancelled
                     ? `<span style="display:flex;gap:6px;"><button disabled style="opacity:.5; cursor:not-allowed;">CANCELLED</button><button class="btn-small" style="background:#7f1d1d;" onclick="deleteBatchId('${batchId}', '${id}')">ELIMINAR</button></span>`
-                    : (canCancel
+                    : (canEdit
                         ? `<span style="display:flex;gap:6px;flex-wrap:wrap;">${isPack ? `<button class="btn-small" style="background:#0ea5e9;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button><button class="btn-small" style="background:#7f1d1d;" onclick="deleteBatchId('${batchId}', '${id}')">ELIMINAR</button></span>`
                         : '-');
                 html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
