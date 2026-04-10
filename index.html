@@ -37,10 +37,15 @@
         .section.active { display: block; }
 
         /* DASHBOARD */
-        .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; margin-bottom: 30px; }
         .dash-card { background: white; padding: 25px; border-radius: 15px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-bottom: 5px solid #ddd; }
         .dash-card h2 { font-size: 48px; margin: 0; color: var(--primary); }
         .dash-card p { margin: 10px 0 0; font-weight: 900; text-transform: uppercase; font-size: 14px; color: #7f8c8d; }
+        .dash-card.overview-click-card { cursor: pointer; user-select: none; transition: transform 0.15s ease, box-shadow 0.15s ease, border-bottom-color 0.15s ease; }
+        .dash-card.overview-click-card:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(0,0,0,0.08); }
+        .dash-card.overview-click-card.active { border-bottom-color: var(--accent); box-shadow: 0 0 0 3px rgba(52,152,219,0.18), 0 8px 18px rgba(0,0,0,0.08); }
+        @media (max-width: 1400px) { .dashboard-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 900px) { .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
         /* KANBAN OVERVIEW */
         .mgmt-wrapper { display: flex; gap: 30px; overflow-x: auto; padding-bottom: 30px; align-items: flex-start; }
@@ -289,10 +294,17 @@
                 <input type="date" id="global-date-filter" onchange="syncGlobalData()" style="width:220px;">
             </div>
             <div class="dashboard-grid">
-                <div class="dash-card"> <h2 id="card-printed">0</h2> <p>Total Printed</p> </div>
-                <div class="dash-card"> <h2 id="card-ready">0</h2> <p>Pending Packing</p> </div>
-                <div class="dash-card"> <h2 id="card-packed">0</h2> <p>Packed Today</p> </div>
-                <div class="dash-card"> <h2 id="card-prepack">0</h2> <p>Pre-Packed Today</p> </div>
+                <div class="dash-card overview-click-card active" id="dash-card-printed" onclick="clearOverviewFilter()" title="Ver todos os lotes do dia"> <h2 id="card-printed">0</h2> <p>Total Printed</p> </div>
+                <div class="dash-card overview-click-card" id="dash-card-ready" onclick="setOverviewFilter('PENDING_PACKING')" title="Ver lotes em Pending Packing"> <h2 id="card-ready">0</h2> <p>Pending Packing</p> </div>
+                <div class="dash-card overview-click-card" id="dash-card-packed" onclick="setOverviewFilter('PACKED_TODAY')" title="Ver lotes com Packed Today"> <h2 id="card-packed">0</h2> <p>Packed Today</p> </div>
+                <div class="dash-card overview-click-card" id="dash-card-ready-pick" onclick="setOverviewFilter('READY_TO_PICK')" title="Ver lotes Ready To Pick"> <h2 id="card-ready-pick">0</h2> <p>Ready To Pick</p> </div>
+                <div class="dash-card" id="dash-card-prepack"> <h2 id="card-prepack">0</h2> <p>Pre-Packed Today</p> </div>
+            </div>
+            <div id="overview-filter-bar" class="card" style="display:none; padding:16px 20px; margin-top:-10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <div id="overview-filter-label" style="font-weight:900; color:var(--primary);"></div>
+                    <button class="btn-small" style="background:var(--accent); padding:12px 16px;" onclick="clearOverviewFilter()">VER TODOS</button>
+                </div>
             </div>
             <div id="mgmt-container" class="mgmt-wrapper"></div>
         </div>
@@ -2509,69 +2521,168 @@ Missing: ${sample}${more}`);
         alert("Erro ao finalizar picking. Ver consola.");
     });
 }
+    let _overviewFilterMode = 'ALL';
+
+    function _getBatchProgressInfo(batch) {
+        const requiredIds = getRequiredBatchIds(batch || {});
+        const total = requiredIds.length;
+        const done = requiredIds.filter(id => (batch.processed_ids && batch.processed_ids[id])).length;
+        const pending = Math.max(0, total - done);
+        return { total, done, pending };
+    }
+
+    function _getOverviewFilterLabel(mode) {
+        if(mode === 'PENDING_PACKING') return 'Pending Packing';
+        if(mode === 'PACKED_TODAY') return 'Packed Today';
+        if(mode === 'READY_TO_PICK') return 'Ready To Pick';
+        return 'All Batches';
+    }
+
+    function _batchMatchesOverviewFilter(batch, mode, stats) {
+        const st = String((batch && batch.status) || '').toUpperCase();
+        const info = stats || _getBatchProgressInfo(batch || {});
+
+        if(mode === 'PENDING_PACKING') return st === 'READY_TO_PACK' && info.pending > 0;
+        if(mode === 'PACKED_TODAY') return info.done > 0;
+        if(mode === 'READY_TO_PICK') return st === 'PENDING_PICK';
+        return true;
+    }
+
+    function _updateOverviewFilterUI() {
+        const map = {
+            ALL: 'dash-card-printed',
+            PENDING_PACKING: 'dash-card-ready',
+            PACKED_TODAY: 'dash-card-packed',
+            READY_TO_PICK: 'dash-card-ready-pick'
+        };
+
+        Object.entries(map).forEach(([mode, id]) => {
+            const el = document.getElementById(id);
+            if(el) el.classList.toggle('active', (_overviewFilterMode || 'ALL') === mode);
+        });
+
+        const bar = document.getElementById('overview-filter-bar');
+        const label = document.getElementById('overview-filter-label');
+        if(bar && label) {
+            if((_overviewFilterMode || 'ALL') === 'ALL') {
+                bar.style.display = 'none';
+                label.innerText = '';
+            } else {
+                bar.style.display = 'block';
+                label.innerText = 'Filter active: ' + _getOverviewFilterLabel(_overviewFilterMode);
+            }
+        }
+    }
+
+    function setOverviewFilter(mode) {
+        const next = mode || 'ALL';
+        if(next !== 'ALL' && _overviewFilterMode === next) _overviewFilterMode = 'ALL';
+        else _overviewFilterMode = next;
+        _updateOverviewFilterUI();
+        syncGlobalData();
+    }
+
+    function clearOverviewFilter() {
+        _overviewFilterMode = 'ALL';
+        _updateOverviewFilterUI();
+        syncGlobalData();
+    }
 
     function renderManagementUI(all, fD) {
         const container = document.getElementById('mgmt-container');
+        if(!container) return;
         container.innerHTML = "";
+        _updateOverviewFilterUI();
 
-        // Group batches by carrier for the selected day
+        const filterMode = _overviewFilterMode || 'ALL';
+
+        // Group filtered batches by carrier for the selected day
         let gr = {};
         for (let k in all) {
             let b = all[k];
-            if (b && b.dateClean === fD) {
-                if (!gr[b.carrier]) gr[b.carrier] = [];
-                gr[b.carrier].push({ ...b, id: k });
-            }
+            if (!(b && b.dateClean === fD)) continue;
+
+            const stats = _getBatchProgressInfo(b);
+            if(!_batchMatchesOverviewFilter(b, filterMode, stats)) continue;
+
+            const carrierKey = b.carrier || 'SEM TRANSPORTADORA';
+            if (!gr[carrierKey]) gr[carrierKey] = [];
+            gr[carrierKey].push({ ...b, id: k, __stats: stats });
         }
 
-        // NEW: compute per-carrier TOTAL (unique IDs), DONE and PENDING (for the header)
+        const carriers = Object.keys(gr).sort();
+        if(!carriers.length) {
+            container.innerHTML = `
+                <div class="card" style="min-width:420px;">
+                    <h3 style="margin-top:0;">Sem resultados</h3>
+                    <div style="color:#666;">Não existem lotes para <b>${_getOverviewFilterLabel(filterMode)}</b> em ${fD}.</div>
+                    ${filterMode !== 'ALL' ? '<button class="btn-small" style="background:var(--accent); margin-top:15px; padding:12px 18px;" onclick="clearOverviewFilter()">VER TUDO</button>' : ''}
+                </div>`;
+            return;
+        }
+
+        // Compute per-carrier totals based on the current filter
         const carrierAgg = {};
-        Object.keys(gr).forEach(c => {
+        carriers.forEach(c => {
             const allIds = new Set();
             const doneIds = new Set();
-            gr[c].forEach(b => {
+            (gr[c] || []).forEach(b => {
+                const stats = b.__stats || _getBatchProgressInfo(b);
                 const requiredIds = getRequiredBatchIds(b);
                 requiredIds.forEach(id => {
                     allIds.add(id);
                     if (b.processed_ids && b.processed_ids[id]) doneIds.add(id);
                 });
+                b.__stats = stats;
             });
-            carrierAgg[c] = { tot: allIds.size, done: doneIds.size };
+            carrierAgg[c] = { tot: allIds.size, done: doneIds.size, batches: (gr[c] || []).length };
         });
 
-        for (let c in gr) {
+        carriers.forEach(c => {
             let col = document.createElement('div');
             col.className = 'carrier-column';
 
             let color = c.includes('CTT') ? 'var(--color-ctt)' : (c.includes('NACEX') ? 'var(--color-nacex)' : 'var(--color-correos)');
 
-            const agg = carrierAgg[c] || { tot: 0, done: 0 };
+            const agg = carrierAgg[c] || { tot: 0, done: 0, batches: 0 };
             const pend = Math.max(0, agg.tot - agg.done);
 
-            // Header now shows totals per carrier
             let h = `
                 <div class="carrier-header" style="background:${color}">
                     <div style="font-weight:900; font-size:16px; line-height:1;">${c}</div>
                     <div style="font-size:12px; font-weight:800; opacity:.95; margin-top:6px;">
-                        TOTAL: ${agg.tot} &nbsp;|&nbsp; DONE: ${agg.done} &nbsp;|&nbsp; PEND: ${pend}
+                        BATCHES: ${agg.batches} &nbsp;|&nbsp; TOTAL: ${agg.tot} &nbsp;|&nbsp; DONE: ${agg.done} &nbsp;|&nbsp; PEND: ${pend}
                     </div>
                 </div>`;
 
-            gr[c].forEach(b => {
-                const requiredIds = getRequiredBatchIds(b);
-                const tot = requiredIds.length;
-                const done = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length;
+            (gr[c] || []).sort((a, b) => {
+                const na = (a.name || a.id || '').toUpperCase();
+                const nb = (b.name || b.id || '').toUpperCase();
+                return na.localeCompare(nb);
+            });
+
+            (gr[c] || []).forEach(b => {
+                const stats = b.__stats || _getBatchProgressInfo(b);
+                const tot = stats.total;
+                const done = stats.done;
+                const pendLocal = stats.pending;
                 const perc = tot > 0 ? Math.round((done / tot) * 100) : 0;
 
-                h += `<div class="batch-card"><h4>${b.name}</h4><div style="display:flex; justify-content:space-between; font-size:12px; color:#666;"><span>${perc}% Done</span><span>Status: ${b.status}</span></div>${b.pickedBy ? '<div style="margin-top:6px; font-size:12px; color:#444;"><b>Picked by:</b> ' + b.pickedBy + (b.pickedAt ? ' <span style="color:#666;">@ ' + b.pickedAt + '</span>' : '') + '</div>' : ''}<div class="progress-container"><div class="progress-bar" style="width:${perc}%"></div></div><div style="display:flex; gap:10px; margin-top:15px;"><button class="btn-small" style="background:var(--accent); flex:1;" onclick="openEditModal('${b.id}', false)">EDIT</button><button class="btn-small btn-delete" onclick="deleteBatch('${b.id}')">DEL</button></div></div>`;
+                let leftInfo = `${perc}% Done`;
+                if(filterMode === 'PENDING_PACKING') leftInfo = `Pending: ${pendLocal}`;
+                if(filterMode === 'PACKED_TODAY') leftInfo = `Packed: ${done}`;
+                if(filterMode === 'READY_TO_PICK') leftInfo = `To Pick: ${tot}`;
+
+                h += `<div class="batch-card"><h4>${b.name}</h4><div style="display:flex; justify-content:space-between; font-size:12px; color:#666;"><span>${leftInfo}</span><span>Status: ${b.status}</span></div>${b.pickedBy ? '<div style="margin-top:6px; font-size:12px; color:#444;"><b>Picked by:</b> ' + b.pickedBy + (b.pickedAt ? ' <span style="color:#666;">@ ' + b.pickedAt + '</span>' : '') + '</div>' : ''}<div class="progress-container"><div class="progress-bar" style="width:${perc}%"></div></div><div style="display:flex; gap:10px; margin-top:15px;"><button class="btn-small" style="background:var(--accent); flex:1;" onclick="openEditModal('${b.id}', false)">EDIT</button><button class="btn-small btn-delete" onclick="deleteBatch('${b.id}')">DEL</button></div></div>`;
             });
 
             col.innerHTML = h;
             container.appendChild(col);
-        }
+        });
     }
 
     // ================================
+
 // 🚚 CARRIER MANAGEMENT (OFFICE)
 // ================================
 function renderCarrierAdminList(carriers) {
@@ -3221,9 +3332,24 @@ function closeModal(id) {
   if(id === 'edit-batch-modal') stopEditBatchListener();
 }
     function updateDashboardStats(all, fD) { 
-        let nP = 0, nR = 0, nK = 0; for(let k in all) { let b = all[k]; if(b.dateClean === fD) { const requiredIds = getRequiredBatchIds(b);
-            const nI = requiredIds.length, nE = requiredIds.filter(id => (b.processed_ids && b.processed_ids[id])).length; nP+=nI; nK+=nE; if(b.status==='READY_TO_PACK') nR+=(nI - nE); } } 
-        document.getElementById('card-printed').innerText = nP; document.getElementById('card-ready').innerText = nR; document.getElementById('card-packed').innerText = nK; 
+        let nP = 0, nR = 0, nK = 0, nReadyPick = 0;
+        for(let k in all) {
+            let b = all[k];
+            if(!(b && b.dateClean === fD)) continue;
+
+            const stats = _getBatchProgressInfo(b);
+            nP += stats.total;
+            nK += stats.done;
+            if(String(b.status || '').toUpperCase() === 'READY_TO_PACK') nR += stats.pending;
+            if(String(b.status || '').toUpperCase() === 'PENDING_PICK') nReadyPick += 1;
+        }
+
+        document.getElementById('card-printed').innerText = nP;
+        document.getElementById('card-ready').innerText = nR;
+        document.getElementById('card-packed').innerText = nK;
+        const readyPickEl = document.getElementById('card-ready-pick');
+        if(readyPickEl) readyPickEl.innerText = nReadyPick;
+        _updateOverviewFilterUI();
     }
     function updateSelects(bts, fD) {
         const selWH = document.getElementById('wh-batch-select'),
