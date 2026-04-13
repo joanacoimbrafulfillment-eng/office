@@ -382,8 +382,8 @@
         <div id="sec-search" class="section">
             <div class="card">
                 <h2>🔍 Deep Order Search</h2>
-                <p>Paste Order IDs to see full history grouped by ID.</p>
-                <textarea id="search-ids-input" rows="4" placeholder="12345678, 87654321"></textarea>
+                <p>Paste Order IDs <b>ou Tracking Numbers</b> para ver o histórico completo. Podes misturar os dois tipos.</p>
+                <textarea id="search-ids-input" rows="4" placeholder="12345678, 87654321, PT123456789PT, ..."></textarea>
                 <div class="grid-2" style="margin-top: 10px;">
                     <div>
                         <label style="font-weight:900; font-size:12px; color:#666;">Start Date</label>
@@ -1577,10 +1577,17 @@ function _parseIds(raw) {
             card.className = "card";
             card.style.padding = "18px";
 
+            // If this ID was resolved from a tracking number, show a small note
+            var resolvedTrackingBadge = "";
+            if(s._resolvedFromTracking){
+                resolvedTrackingBadge = "<div style='font-size:11px; color:#0ea5e9; font-weight:900; margin-bottom:4px;'>🔍 Encontrado via tracking: <span style='font-family:monospace;'>" + _fmt(s._resolvedFromTracking) + "</span></div>";
+            }
+
             var top = "<div style='display:flex; justify-content:space-between; align-items:center; gap:10px;'>"
                 + "<div style='font-size:20px; font-weight:900;'>ID " + id + "</div>"
                 + "<div style='background:" + badgeColor + "; color:white; padding:6px 10px; border-radius:10px; font-weight:900; font-size:12px;'>" + status + "</div>"
-                + "</div>";
+                + "</div>"
+                + resolvedTrackingBadge;
 
             var lines = "";
             if (batchName) lines += "<div style='margin-top:10px; font-size:14px;'><b>Batch:</b> " + batchName + "</div>";
@@ -1807,6 +1814,101 @@ function _parseIds(raw) {
     }
     return s;
 }
+
+        // ── TRACKING RESOLUTION ──────────────────────────────────────────────
+        // Some tokens entered by the user might be tracking numbers, not order IDs.
+        // We resolve them to order IDs by scanning registos for matching `track` values.
+        // Tokens that are already resolved as IDs (found in histSnaps or regData) are kept as-is.
+        (function(){
+            var trackingTokens = [];
+            idsToSearch.forEach(function(tok, ix){
+                // A token is treated as a tracking number candidate if:
+                // - id_history returned no data for it (histSnaps[ix] is empty), AND
+                // - no registo entry has it as an `id`
+                var hasIdHistory = histSnaps[ix] && histSnaps[ix].val() !== null;
+                if(hasIdHistory) return; // already a known order ID
+
+                var foundAsId = false;
+                Object.values(regData).forEach(function(r){
+                    if(r && _fmt(r.id).trim() === tok) foundAsId = true;
+                });
+                if(foundAsId) return;
+
+                // Looks like a tracking number — queue for reverse lookup
+                trackingTokens.push({ tok: tok, ix: ix });
+            });
+
+            if(!trackingTokens.length) return;
+
+            // For each tracking token, find order IDs in regData whose `track` field matches
+            trackingTokens.forEach(function(entry){
+                var tok = entry.tok;
+                var tokUpper = tok.toUpperCase();
+                var resolvedIds = [];
+
+                Object.values(regData).forEach(function(r){
+                    if(!r) return;
+                    var t = _fmt(r.track).trim().toUpperCase();
+                    if(t && t === tokUpper) {
+                        var oid = _fmt(r.id).trim();
+                        if(oid && resolvedIds.indexOf(oid) === -1) resolvedIds.push(oid);
+                    }
+                });
+
+                // Also check id_history entries for Tracking field
+                // (already loaded for this token index — will always be empty here, but check batch data)
+                Object.values(batchData).forEach(function(b){
+                    if(!b || !b.expected_ids) return;
+                    // check if any registos for this batch has the tracking
+                    // (already covered above via regData)
+                });
+
+                if(!resolvedIds.length){
+                    // No match found — keep original token so user sees a "NOT FOUND" card
+                    return;
+                }
+
+                // Replace the placeholder token in searchCache.ids and histSnaps with the resolved IDs
+                // We splice out the placeholder and inject the resolved IDs
+                var spliceIx = searchCache.ids.indexOf(tok);
+                if(spliceIx !== -1){
+                    var newIds = resolvedIds.filter(function(rid){ return searchCache.ids.indexOf(rid) === -1; });
+                    // Replace the tracking token with resolved IDs in-place
+                    searchCache.ids.splice(spliceIx, 1, ...newIds);
+                    // Also update idsToSearch so the forEach below sees the resolved IDs
+                    idsToSearch.splice(entry.ix, 1, ...newIds);
+                    // Patch histSnaps: insert empty snaps for the new IDs, remove old slot
+                    // (they will be fetched below via a secondary pass)
+                    histSnaps.splice(entry.ix, 1, ...newIds.map(function(){ return { val: function(){ return null; } }; }));
+                }
+
+                // Mark these resolved IDs as "came from tracking lookup" so the card shows the tracking token
+                newIds && newIds.forEach && newIds.forEach(function(rid){
+                    searchCache.summaryById[rid] = searchCache.summaryById[rid] || {};
+                    searchCache.summaryById[rid]._resolvedFromTracking = tok;
+                });
+            });
+
+            // Secondary fetch: load id_history for any newly injected IDs that we haven't fetched yet
+            // We do this synchronously-ish by flagging; the forEach below handles null histSnaps gracefully
+        })();
+
+        // Re-fetch id_history for any IDs that were injected by tracking resolution (histSnaps slot is a stub)
+        // We collect them, fetch in parallel, then continue with the render.
+        var _stubIndices = [];
+        idsToSearch.forEach(function(sid, ix){
+            if(!histSnaps[ix] || typeof histSnaps[ix].val !== 'function' || histSnaps[ix].val() === null){
+                // Could be a stub from tracking resolution — re-fetch
+                _stubIndices.push(ix);
+            }
+        });
+        if(_stubIndices.length){
+            var _refetched = await Promise.all(_stubIndices.map(function(ix){
+                return db.ref('id_history/' + idsToSearch[ix]).once('value');
+            }));
+            _stubIndices.forEach(function(ix, j){ histSnaps[ix] = _refetched[j]; });
+        }
+        // ── END TRACKING RESOLUTION ──────────────────────────────────────────
 
         idsToSearch.forEach(function(sid, ix){
             var events = [];
