@@ -901,21 +901,27 @@ document.addEventListener('click', (e) => {
         if (inp && !['INPUT','TEXTAREA','SELECT','OPTION','BUTTON'].includes(e.target.tagName) && !e.target.closest('.modal-content')) { inp.focus(); }
     });
 
-    window.onload = () => { 
-        const today = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
-        document.querySelectorAll('input[type="date"]').forEach(i => i.value = today);
-    
+    window.onload = () => {
+        const today = _todayDateClean();
+
+        // Set only the inputs that genuinely default to today — do NOT touch
+        // global-date-filter (handled by setupUI after auth) or search dates (set below).
+        ['off-batch-date','perf-date-filter','rep-start-date','rep-end-date',
+         'cross-start','cross-end'].forEach(function(id){
+            var el = document.getElementById(id);
+            if(el && !el.value) el.value = today;
+        });
+
+        // Search dates: default to last 7 days → today
         try {
-            var todayObj = new Date();
-            var end = todayObj.getFullYear()+'-'+String(todayObj.getMonth()+1).padStart(2,'0')+'-'+String(todayObj.getDate()).padStart(2,'0');
-            var startObj = new Date(todayObj.getTime() - (7 * 24 * 60 * 60 * 1000));
+            var startObj = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000));
             var start = startObj.getFullYear()+'-'+String(startObj.getMonth()+1).padStart(2,'0')+'-'+String(startObj.getDate()).padStart(2,'0');
             var sEl = document.getElementById('search-start-date');
             var eEl = document.getElementById('search-end-date');
-            if (sEl) sEl.value = start;
-            if (eEl) eEl.value = end;
+            if(sEl && !sEl.value) sEl.value = start;
+            if(eEl && !eEl.value) eEl.value = today;
         } catch(e) {}
-};
+    };
 
     auth.onAuthStateChanged(user => {
         if (user) { currentUser = user; setupUI(user.email); } 
@@ -1010,11 +1016,13 @@ document.addEventListener('click', (e) => {
         const inRange = (d) => (d && d >= start && d <= end);
 
         if (type === 'ACTIVITY') {
-            const [snap, batchSnap] = await Promise.all([
+            const [snap, activeBatchSnap, deletedBatchSnap] = await Promise.all([
                 db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
-                db.ref('active_batches').once('value')
+                db.ref('active_batches').once('value'),
+                db.ref('deleted_batches').once('value')
             ]);
-            const batches = batchSnap.val() || {};
+            // Merge: active takes priority over archived for same key
+            const batches = Object.assign({}, deletedBatchSnap.val() || {}, activeBatchSnap.val() || {});
 
             Object.values(snap.val() || {}).forEach(r => {
                 if (inRange(r.dateClean)) {
@@ -1038,12 +1046,13 @@ document.addEventListener('click', (e) => {
         } else if (type === 'CARRIERS') {
             // CARRIERS: export ALL IDs created in batches in the date range,
             // including batch info, who packed, tracking, contents, status + cancellation reason.
-            const [batchSnap, regSnap] = await Promise.all([
+            const [activeBSnap, deletedBSnap, regSnap] = await Promise.all([
                 db.ref('active_batches').once('value'),
+                db.ref('deleted_batches').once('value'),
                 db.ref('registos').once('value')
             ]);
-
-            const batches = batchSnap.val() || {};
+            // Merge: active takes priority over archived for same key
+            const batches = Object.assign({}, deletedBSnap.val() || {}, activeBSnap.val() || {});
             const registos = regSnap.val() || {};
 
             // Build quick lookup for packing records: batchKey -> id -> latest packing record
@@ -1365,15 +1374,23 @@ function handleScan(v, mode) {
         if(scanData.id && scanData.track) document.getElementById('btn-confirm-order').style.display = 'block';
     }
 
+    let _confirmOrderInProgress = false;
     async function confirmOrder(mode) {
+        if(_confirmOrderInProgress) return; // prevent double-submit
+        _confirmOrderInProgress = true;
+
         const m = mode || currentMode;
         const bId = document.getElementById('wh-batch-select').value;
 
         // Guard: allow viewing old/COMPLETED batches, but block writing packing records
         if(m === 'PACKING' && activeBatchData && activeBatchData.status && activeBatchData.status !== 'READY_TO_PACK') {
+            _confirmOrderInProgress = false;
             return uiAlert("Este lote está fechado (COMPLETED) ou ainda não está pronto para packing.");
         }
-        if(!scanData.id || !scanData.track) return uiAlert("Faltam dados!");
+        if(!scanData.id || !scanData.track) {
+            _confirmOrderInProgress = false;
+            return uiAlert("Faltam dados!");
+        }
 
         const endTime = _nowTime();
         const endTs = Date.now();
@@ -1383,6 +1400,7 @@ function handleScan(v, mode) {
                 await db.ref(`active_batches/${bId}/processed_ids/${scanData.id}`).set(true);
                 logBatchAction(bId, `PACKED ID: ${scanData.id}`);
             }
+            const dc = _nowDateClean();
             await db.ref('registos').push({ 
                 id: scanData.id, 
                 track: scanData.track, 
@@ -1395,11 +1413,10 @@ function handleScan(v, mode) {
                 startTs: (typeof scanData.startTs === 'number') ? scanData.startTs : null,
                 endTs: endTs,
                 time: endTime, // Main sorting time
-                dateClean: (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()
+                dateClean: dc
             });
 
-            // NEW: write to persistent ID history so SEARCH can show all events even across batch recreations
-            const dc = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()
+            // Write to persistent ID history so SEARCH can show all events even across batch recreations
             const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
             const bKey = bId || "GENERAL";
             const bName = (m === 'PACKING' && activeBatchData && activeBatchData.name) ? activeBatchData.name : bKey;
@@ -1419,8 +1436,12 @@ function handleScan(v, mode) {
                     : "Return saved"
             });
 
-            resetScan(); 
-        } catch (e) { uiAlert("Erro ao gravar."); }
+            resetScan();
+        } catch (e) {
+            uiAlert("Erro ao gravar.");
+        } finally {
+            _confirmOrderInProgress = false;
+        }
     }
 
     function resetScan() {
@@ -1869,21 +1890,17 @@ function _parseIds(raw) {
                 }
 
                 // Replace the placeholder token in searchCache.ids and histSnaps with the resolved IDs
-                // We splice out the placeholder and inject the resolved IDs
                 var spliceIx = searchCache.ids.indexOf(tok);
+                var newIds = []; // always declared — used below regardless of spliceIx
                 if(spliceIx !== -1){
-                    var newIds = resolvedIds.filter(function(rid){ return searchCache.ids.indexOf(rid) === -1; });
-                    // Replace the tracking token with resolved IDs in-place
+                    newIds = resolvedIds.filter(function(rid){ return searchCache.ids.indexOf(rid) === -1; });
                     searchCache.ids.splice(spliceIx, 1, ...newIds);
-                    // Also update idsToSearch so the forEach below sees the resolved IDs
                     idsToSearch.splice(entry.ix, 1, ...newIds);
-                    // Patch histSnaps: insert empty snaps for the new IDs, remove old slot
-                    // (they will be fetched below via a secondary pass)
                     histSnaps.splice(entry.ix, 1, ...newIds.map(function(){ return { val: function(){ return null; } }; }));
                 }
 
-                // Mark these resolved IDs as "came from tracking lookup" so the card shows the tracking token
-                newIds && newIds.forEach && newIds.forEach(function(rid){
+                // Mark resolved IDs as "came from tracking lookup" so the card shows the tracking token
+                newIds.forEach(function(rid){
                     searchCache.summaryById[rid] = searchCache.summaryById[rid] || {};
                     searchCache.summaryById[rid]._resolvedFromTracking = tok;
                 });
@@ -2495,7 +2512,8 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
 
 function logBatchAction(bId, msg) {
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
-        return db.ref(`active_batches/${bId}/history`).push({ time: _nowDateTime(), user: uname, msg });
+        return db.ref(`active_batches/${bId}/history`).push({ time: _nowDateTime(), user: uname, msg })
+            .catch(function(err){ console.warn('logBatchAction failed (non-critical):', err); });
     }
 
 
@@ -3652,7 +3670,7 @@ function showMetadata(id) {
 
         const endTime = _nowTime();
         const endTs = Date.now();
-        const dc = _nowDateClean ? _nowDateClean() : (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()
+        const dc = _nowDateClean();
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
 
         const newProds = packedEditState.items.length ? packedEditState.items.join(' | ') : "No Items";
@@ -3950,11 +3968,11 @@ function closeModal(id) {
         document.getElementById('off-order-meta').value="";
 }
 
-function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: (function(){var d=new Date();var y=d.getFullYear();var m=String(d.getMonth()+1).padStart(2,'0');var day=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+day;})() }).then(() => { resetScan(); loadPrePackHistory(); }); }
+function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: _nowDateClean() }).then(() => { resetScan(); loadPrePackHistory(); }); }
     let __offReturnRef = null, __offReturnCb = null;
     function loadRecentReturns() {
         const tbody = document.querySelector('#recent-returns-table tbody'); if(!tbody) return;
-        const today = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+        const today = _nowDateClean();
         const u = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
         if(__offReturnRef && __offReturnCb){ __offReturnRef.off('value', __offReturnCb); }
         __offReturnRef = db.ref('registos').orderByChild('user').equalTo(u).limitToLast(300);
@@ -3968,7 +3986,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     }
     let __offPrepackRef = null, __offPrepackCb = null;
     function loadPrePackHistory() {
-        const fD = (function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+        const fD = _nowDateClean();
         const tbody = document.querySelector('#prepack-recent-table tbody'); if(!tbody) return;
         if(__offPrepackRef && __offPrepackCb){ __offPrepackRef.off('value', __offPrepackCb); }
         __offPrepackRef = db.ref('pre_packing').orderByChild('dateClean').equalTo(fD).limitToLast(400);
