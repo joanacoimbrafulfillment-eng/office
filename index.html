@@ -1870,7 +1870,7 @@ function _parseIds(raw) {
                 Object.values(regData).forEach(function(r){
                     if(!r) return;
                     var t = _fmt(r.track).trim().toUpperCase();
-                    if(t && t === tokUpper) {
+                    if(t && (t === tokUpper || t.indexOf(tokUpper) !== -1)) {
                         var oid = _fmt(r.id).trim();
                         if(oid && resolvedIds.indexOf(oid) === -1) resolvedIds.push(oid);
                     }
