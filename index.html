@@ -2478,41 +2478,45 @@ function openEditModal(batchId, readOnly = false) {
         // stop previous listener so it can't reopen later
         stopEditBatchListener();
 
-        __editBatchRef = db.ref('active_batches/'+batchId);
-        __editBatchCb = function(snap){
-            const b = snap.val(); if(!b) return;
-            document.getElementById('edit-batch-title').innerText = b.name;
-
-const metaEl = document.getElementById('edit-batch-meta');
-if(metaEl){
-    const parts = [];
-    parts.push(`<div><b>Status:</b> ${_fmt(b.status)}</div>`);
-    if (b.carrier) parts.push(`<div><b>Carrier:</b> ${_fmt(b.carrier)}</div>`);
-    if (b.pickedBy) parts.push(`<div><b>Picked by:</b> ${_fmt(b.pickedBy)}${b.pickedAt ? ` <span style="color:#666;">@ ${_fmt(b.pickedAt)}</span>` : ''}</div>`);
-    metaEl.innerHTML = parts.join('');
-
-    if(!b.pickedBy){
-        getPickingInfo(batchId).then(info => {
-            if(info && info.pickedBy){
-                const parts2 = [];
-                parts2.push(`<div><b>Status:</b> ${_fmt(b.status)}</div>`);
-                if (b.carrier) parts2.push(`<div><b>Carrier:</b> ${_fmt(b.carrier)}</div>`);
-                parts2.push(`<div><b>Picked by:</b> ${_fmt(info.pickedBy)}${info.pickedAt ? ` <span style="color:#666;">@ ${_fmt(info.pickedAt)}</span>` : ''}</div>`);
-                metaEl.innerHTML = parts2.join('');
+        // Helper: renders the modal content for a given batch object
+        function _renderEditModalContent(b, isArchived){
+            if(!b) {
+                uiAlert('Lote não encontrado (nem em active_batches nem em deleted_batches).', {type:'error'});
+                return;
             }
-        });
-    }
-}
-            document.getElementById('modal-delete-btn').style.display = (readOnly || !currentUser.email.endsWith('@admin.com')) ? 'none' : 'block';
-            // Carrier controls inside modal (admin)
-            try{ renderBatchCarrierControls(batchId, b, readOnly); }catch(e){}
+            // archived batches are always read-only
+            const effectiveReadOnly = readOnly || isArchived;
+
+            document.getElementById('edit-batch-title').innerText = b.name || batchId;
+
+            const metaEl = document.getElementById('edit-batch-meta');
+            if(metaEl){
+                const parts = [];
+                parts.push(`<div><b>Status:</b> ${_fmt(b.status)}${isArchived ? ' <span style="background:#f59e0b;color:#fff;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:900;margin-left:6px;">ARQUIVADO</span>' : ''}</div>`);
+                if (b.carrier) parts.push(`<div><b>Carrier:</b> ${_fmt(b.carrier)}</div>`);
+                if (b.pickedBy) parts.push(`<div><b>Picked by:</b> ${_fmt(b.pickedBy)}${b.pickedAt ? ` <span style="color:#666;">@ ${_fmt(b.pickedAt)}</span>` : ''}</div>`);
+                metaEl.innerHTML = parts.join('');
+
+                if(!b.pickedBy && !isArchived){
+                    getPickingInfo(batchId).then(info => {
+                        if(info && info.pickedBy){
+                            const parts2 = [];
+                            parts2.push(`<div><b>Status:</b> ${_fmt(b.status)}</div>`);
+                            if (b.carrier) parts2.push(`<div><b>Carrier:</b> ${_fmt(b.carrier)}</div>`);
+                            parts2.push(`<div><b>Picked by:</b> ${_fmt(info.pickedBy)}${info.pickedAt ? ` <span style="color:#666;">@ ${_fmt(info.pickedAt)}</span>` : ''}</div>`);
+                            metaEl.innerHTML = parts2.join('');
+                        }
+                    });
+                }
+            }
+            document.getElementById('modal-delete-btn').style.display = (effectiveReadOnly || !currentUser.email.endsWith('@admin.com')) ? 'none' : 'block';
+            try{ renderBatchCarrierControls(batchId, b, effectiveReadOnly); }catch(e){}
             const tbody = document.querySelector('#edit-inventory-table tbody'); tbody.innerHTML = "";
             Object.keys(b.inventory || {}).sort().forEach(k => {
                 const it = b.inventory[k];
-                tbody.innerHTML += `<tr><td>${k}</td><td>${readOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInventoryQty('${batchId}', '${k}', ${it.q}, this.value)">`}</td><td>${it.pos}</td>${readOnly ? '' : `<td><button class="btn-small btn-delete" onclick="removeInventoryItem('${batchId}', '${k}', ${it.q})">X</button></td>`}</tr>`;
+                tbody.innerHTML += `<tr><td>${k}</td><td>${effectiveReadOnly ? it.q : `<input type="number" style="width:70px;" value="${it.q}" onchange="updateInventoryQty('${batchId}', '${k}', ${it.q}, this.value)">`}</td><td>${it.pos}</td>${effectiveReadOnly ? '' : `<td><button class="btn-small btn-delete" onclick="removeInventoryItem('${batchId}', '${k}', ${it.q})">X</button></td>`}</tr>`;
             });
             const idsList = document.getElementById('edit-ids-list');
-            // Store order detail values safely, keyed by index, to avoid any quoting issues in onclick HTML
             window._orderEditStore = {};
             let html = '<table><thead><tr><th>ID</th><th>Cliente</th><th>Content</th><th>Status</th><th>Ação</th></tr></thead><tbody>';
             (b.expected_ids||[]).forEach((id, _oidx) => {
@@ -2521,10 +2525,9 @@ if(metaEl){
                 const det = (b.order_details||{})[id] || {name:"N/A", content:"N/A"};
                 const cancelInfo = isCancelled ? b.cancelled_ids[id] : null;
 
-                const canEdit = (!readOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
+                const canEdit = (!effectiveReadOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
                 const canEditOrderFields = canEdit && !isPack && !isCancelled;
 
-                // Store values safely — no risk of quote breakage in HTML
                 const storeKey = batchId + '||' + id;
                 window._orderEditStore[storeKey] = { name: det.name || '', content: det.content || '' };
 
@@ -2545,10 +2548,6 @@ if(metaEl){
                     : (canEditOrderFields
                         ? `<span style="display:flex;align-items:center;gap:4px;">${det.content || 'N/A'}<button class="btn-small" style="background:#64748b;padding:3px 7px;font-size:10px;" onclick="editOrderField('${batchId}','${id}','content')">✏️</button></span>`
                         : `${det.content || 'N/A'}`);
-
-                let statusTxt = 'PENDING';
-                if (isPack) statusTxt = 'PACKED';
-                if (isCancelled) statusTxt = 'CANCELADO';
 
                 const statusCell = isCancelled
                     ? `<span style="color:#b91c1c; font-weight:900;">CANCELADO</span><div style="font-size:12px; color:#991b1b; margin-top:4px;">${(cancelInfo && cancelInfo.reason) ? ('Motivo: ' + cancelInfo.reason) : ''}</div>`
@@ -2571,11 +2570,29 @@ if(metaEl){
             if(b.history) { Object.values(b.history).reverse().forEach(log => { logBox.innerHTML += `<div style="border-bottom:1px solid #eee; padding:4px;"><b>[${log.time}] ${log.user}:</b> ${log.msg}</div>`; }); }
             const cancelBox = document.getElementById('cancelled-ids-log'); cancelBox.innerHTML = "";
             if(b.cancelled_ids) { Object.values(b.cancelled_ids).reverse().forEach(c => { cancelBox.innerHTML += `<div><b>ID ${c.id}:</b> ${c.reason} <br><small>By ${c.user} at ${c.time}</small></div>`; }); }
+
+            // open ONCE (user-driven), not on every realtime update
+            document.getElementById('edit-batch-modal').style.display = 'flex';
+        }
+
+        // Try active_batches first; fallback to deleted_batches for archived lots
+        __editBatchRef = db.ref('active_batches/'+batchId);
+        __editBatchCb = function(snap){
+            const b = snap.val();
+            if(!b) {
+                // Batch not found in active_batches — try deleted_batches (archived)
+                db.ref('deleted_batches/'+batchId).once('value').then(function(archivedSnap){
+                    _renderEditModalContent(archivedSnap.val(), true);
+                }).catch(function(err){
+                    console.error('openEditModal: deleted_batches lookup failed', err);
+                    uiAlert('Erro ao carregar dados do lote arquivado.');
+                });
+                return;
+            }
+            // active batch found — render normally (not archived)
+            _renderEditModalContent(b, false);
                     };
         __editBatchRef.on('value', __editBatchCb);
-
-        // open ONCE (user-driven), not on every realtime update
-        document.getElementById('edit-batch-modal').style.display = 'flex';
     }
 
     function loadBatchData(bId) {
