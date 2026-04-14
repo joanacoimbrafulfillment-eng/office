@@ -230,8 +230,6 @@
         .tbl-head { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
 
         /* Responsive media queries adicionais */
-        @media (max-width: 1400px) { .dashboard-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-        @media (max-width: 900px)  { .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 600px)  {
             .grid-2 { grid-template-columns: 1fr; }
             .nav-item { padding: 20px 10px; font-size: 10px; }
@@ -419,6 +417,18 @@
     </div>
 </div>
 
+<!-- MODAL: PRE-PACKED TODAY -->
+<div id="prepack-today-modal" class="modal">
+    <div class="modal-content" style="max-width:700px;">
+        <div class="flex-between">
+            <h2 style="font-size:26px; margin:0;">📦 Pre-Packed Today</h2>
+            <button class="btn-small btn-delete" style="padding:12px 20px;" onclick="closeModal('prepack-today-modal')">FECHAR</button>
+        </div>
+        <div id="prepack-today-date" style="margin:8px 0 18px; font-size:13px; color:#666; font-weight:700;"></div>
+        <div id="prepack-today-body"></div>
+    </div>
+</div>
+
 <div id="main-interface" style="display:none;">
     <div class="nav-bar">
         <div id="menu-items" style="display:flex;"></div>
@@ -438,7 +448,7 @@
                 <div class="dash-card overview-click-card" id="dash-card-ready" onclick="setOverviewFilter('PENDING_PACKING')" title="Ver lotes em Pending Packing"> <h2 id="card-ready">0</h2> <p>Pending Packing</p> </div>
                 <div class="dash-card overview-click-card" id="dash-card-packed" onclick="setOverviewFilter('PACKED_TODAY')" title="Ver lotes com Packed Today"> <h2 id="card-packed">0</h2> <p>Packed Today</p> </div>
                 <div class="dash-card overview-click-card" id="dash-card-ready-pick" onclick="setOverviewFilter('READY_TO_PICK')" title="Ver lotes Ready To Pick"> <h2 id="card-ready-pick">0</h2> <p>Ready To Pick</p> </div>
-                <div class="dash-card" id="dash-card-prepack"> <h2 id="card-prepack">0</h2> <p>Pre-Packed Today</p> </div>
+                <div class="dash-card overview-click-card" id="dash-card-prepack" onclick="openPrepackTodayModal()" title="Ver produtos pré-embalados hoje"> <h2 id="card-prepack">0</h2> <p>Pre-Packed Today</p> </div>
             </div>
             <div id="overview-filter-bar" class="card" style="display:none; padding:16px 20px; margin-top:-10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -3291,7 +3301,87 @@ function loadPrepackCardOnce(fD){
     }
 }
 
-// ===== Realtime core wiring (avoid duplicate listeners) =====
+// ===== PRE-PACKED TODAY MODAL =====
+async function openPrepackTodayModal() {
+    try {
+        const fD = document.getElementById('global-date-filter').value || _nowDateClean();
+        const dateLabel = document.getElementById('prepack-today-date');
+        const body = document.getElementById('prepack-today-body');
+        if(dateLabel) dateLabel.textContent = 'Data: ' + fD;
+        if(body) body.innerHTML = '<div style="padding:20px; color:#666; text-align:center;">A carregar...</div>';
+
+        document.getElementById('prepack-today-modal').style.display = 'flex';
+
+        const snap = await db.ref('pre_packing')
+            .orderByChild('dateClean')
+            .equalTo(fD)
+            .limitToLast(1000)
+            .once('value');
+
+        const data = snap.val() || {};
+        const records = Object.values(data);
+
+        if (!records.length) {
+            body.innerHTML = '<div style="padding:20px; color:#666; text-align:center;">Sem registos de pré-embalagem para este dia.</div>';
+            return;
+        }
+
+        // Agrupa por produto e conta
+        const counts = {};
+        records.forEach(r => {
+            const prod = (r.product || 'DESCONHECIDO').trim();
+            counts[prod] = (counts[prod] || 0) + 1;
+        });
+
+        // Ordena por quantidade decrescente
+        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const total = records.length;
+
+        let html = `
+            <div style="margin-bottom:16px; padding:12px 16px; background:#f0fdf4; border-radius:10px; border:1px solid #bbf7d0;">
+                <span style="font-weight:900; font-size:16px; color:#166534;">Total scans: ${total}</span>
+                <span style="font-size:13px; color:#555; margin-left:12px;">${sorted.length} produto(s) diferentes</span>
+            </div>
+            <div class="scroll-area" style="max-height:420px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:60%;">Produto</th>
+                            <th style="text-align:center;">Quantidade</th>
+                            <th style="text-align:center;">%</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+        sorted.forEach(([prod, qty]) => {
+            const pct = Math.round((qty / total) * 100);
+            html += `
+                <tr>
+                    <td>${prod}</td>
+                    <td style="text-align:center; font-weight:900; font-size:16px;">${qty}</td>
+                    <td style="text-align:center;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <div style="flex:1; background:#eee; border-radius:6px; height:8px; overflow:hidden;">
+                                <div style="width:${pct}%; background:var(--color-prepack); height:100%;"></div>
+                            </div>
+                            <span style="font-size:12px; color:#666; min-width:32px;">${pct}%</span>
+                        </div>
+                    </td>
+                </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+
+    } catch(e) {
+        console.error('openPrepackTodayModal error:', e);
+        const body = document.getElementById('prepack-today-body');
+        if(body) body.innerHTML = '<div style="color:red; padding:20px;">Erro ao carregar dados.</div>';
+    }
+}
+window.openPrepackTodayModal = openPrepackTodayModal;
+
+
 let _activeBatchesRef = null;
 let _activeBatchesCb  = null;
 let _activeBatchesCache = {};
