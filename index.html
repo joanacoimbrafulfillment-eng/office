@@ -48,8 +48,8 @@
         @media (max-width: 900px) { .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
         /* KANBAN OVERVIEW */
-        .mgmt-wrapper { display: flex; gap: 30px; overflow-x: auto; padding-bottom: 30px; align-items: flex-start; }
-        .carrier-column { min-width: 380px; max-width: 380px; flex-shrink: 0; background: rgba(0,0,0,0.03); border-radius: 20px; padding: 15px; }
+        .mgmt-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; padding-bottom: 20px; align-items: flex-start; }
+        .carrier-column { min-width: 0; max-width: 100%; flex-shrink: 1; background: rgba(0,0,0,0.03); border-radius: 20px; padding: 15px; }
         .carrier-header { border-radius: 12px; color: white; padding: 15px; font-weight: 900; font-size: 18px; text-align: center; margin-bottom: 15px; text-transform: uppercase; }
         .batch-card { background: white; border-radius: 15px; padding: 20px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
         .progress-container { background: #eee; border-radius: 10px; height: 8px; margin: 12px 0; overflow: hidden; }
