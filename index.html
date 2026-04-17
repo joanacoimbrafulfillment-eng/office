@@ -3417,7 +3417,9 @@ async function openCancelledIdsModal() {
             archivedBts = _archivedByDateCache[fD] || {};
         } catch(e) { /* non-critical */ }
 
-        const allBts = Object.assign({}, archivedBts, activeBts);
+        // Merge: archived tem prioridade para datas passadas (dados completos arquivados);
+        // active sobrescreve apenas se o lote ainda estiver ativo nessa data
+        const allBts = Object.assign({}, activeBts, archivedBts);
 
         // Collect all cancelled IDs across all batches of this day
         const rows = [];
@@ -3632,7 +3634,8 @@ async function _syncOverviewForPastDate(fD) {
         try{ updateSelects(merged, fD); }catch(e){}
     } catch(e) {
         console.error('_syncOverviewForPastDate error:', e);
-        // Fallback: render só com active_batches
+        // Fallback: render só com active_batches mas filtrado pela data correta
+        // (evita mostrar dados de hoje ao falhar o load de archived)
         const bts = _activeBatchesCache || {};
         try{ updateDashboardStats(bts, fD); }catch(e2){}
         try{ renderManagementUI(bts, fD); }catch(e2){}
@@ -4000,17 +4003,43 @@ function closeModal(id) {
   if(id === 'edit-batch-modal') stopEditBatchListener();
 }
     function updateDashboardStats(all, fD) { 
+        const isToday = (fD === _todayDateClean());
         let nP = 0, nR = 0, nK = 0, nReadyPick = 0, nCancelled = 0;
+
+        // Para dias anteriores, processed_ids pode estar ausente nos lotes arquivados.
+        // Contamos IDs únicos picados a partir de um índice construído dos lotes do dia.
+        const packedIdsForDay = new Set();
+
         for(let k in all) {
             let b = all[k];
             if(!(b && b.dateClean === fD)) continue;
 
             const stats = _getBatchProgressInfo(b);
             nP += stats.total;
-            nK += stats.done;
-            if(String(b.status || '').toUpperCase() === 'READY_TO_PACK') nR += stats.pending;
-            if(String(b.status || '').toUpperCase() === 'PENDING_PICK') nReadyPick += 1;
+
+            if(isToday) {
+                // Hoje: processed_ids está atualizado em tempo real — usar diretamente
+                nK += stats.done;
+                if(String(b.status || '').toUpperCase() === 'READY_TO_PACK') nR += stats.pending;
+                if(String(b.status || '').toUpperCase() === 'PENDING_PICK') nReadyPick += 1;
+            } else {
+                // Dias anteriores: lotes já estão COMPLETED no arquivo.
+                // "Packed" = IDs que tinham processed_ids (arquivados com o lote) 
+                if(b.processed_ids) {
+                    const requiredIds = getRequiredBatchIds(b);
+                    requiredIds.forEach(id => {
+                        if(b.processed_ids[id]) packedIdsForDay.add(id);
+                    });
+                }
+                // Pending Packing e Ready To Pick não fazem sentido para dias passados
+                // (todos os lotes finalizados ficam COMPLETED) — mantemos em 0.
+            }
+
             if(b.cancelled_ids) nCancelled += Object.keys(b.cancelled_ids).length;
+        }
+
+        if(!isToday) {
+            nK = packedIdsForDay.size;
         }
 
         document.getElementById('card-printed').innerText = nP;
