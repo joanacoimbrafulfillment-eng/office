@@ -417,6 +417,18 @@
     </div>
 </div>
 
+<!-- MODAL: CANCELLED IDS -->
+<div id="cancelled-ids-modal" class="modal">
+    <div class="modal-content" style="max-width:800px;">
+        <div class="flex-between">
+            <h2 style="font-size:26px; margin:0;">🚫 Cancelled IDs</h2>
+            <button class="btn-small btn-delete" style="padding:12px 20px;" onclick="closeModal('cancelled-ids-modal')">FECHAR</button>
+        </div>
+        <div id="cancelled-ids-date" style="margin:8px 0 18px; font-size:13px; color:#666; font-weight:700;"></div>
+        <div id="cancelled-ids-body"></div>
+    </div>
+</div>
+
 <!-- MODAL: PRE-PACKED TODAY -->
 <div id="prepack-today-modal" class="modal">
     <div class="modal-content" style="max-width:700px;">
@@ -449,6 +461,7 @@
                 <div class="dash-card overview-click-card" id="dash-card-packed" onclick="setOverviewFilter('PACKED_TODAY')" title="Ver lotes com Packed Today"> <h2 id="card-packed">0</h2> <p>Packed Today</p> </div>
                 <div class="dash-card overview-click-card" id="dash-card-ready-pick" onclick="setOverviewFilter('READY_TO_PICK')" title="Ver lotes Ready To Pick"> <h2 id="card-ready-pick">0</h2> <p>Ready To Pick</p> </div>
                 <div class="dash-card overview-click-card" id="dash-card-prepack" onclick="openPrepackTodayModal()" title="Ver produtos pré-embalados hoje"> <h2 id="card-prepack">0</h2> <p>Pre-Packed Today</p> </div>
+                <div class="dash-card overview-click-card" id="dash-card-cancelled" onclick="openCancelledIdsModal()" title="Ver IDs cancelados no dia" style="border-bottom-color:#e74c3c;"> <h2 id="card-cancelled" style="color:#e74c3c;">0</h2> <p>Cancelled IDs</p> </div>
             </div>
             <div id="overview-filter-bar" class="card" style="display:none; padding:16px 20px; margin-top:-10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -3382,6 +3395,104 @@ async function openPrepackTodayModal() {
 window.openPrepackTodayModal = openPrepackTodayModal;
 
 
+// ===== CANCELLED IDS MODAL =====
+async function openCancelledIdsModal() {
+    try {
+        const fD = document.getElementById('global-date-filter').value || _nowDateClean();
+        const dateLabel = document.getElementById('cancelled-ids-date');
+        const body = document.getElementById('cancelled-ids-body');
+        if(dateLabel) dateLabel.textContent = 'Data: ' + fD;
+        if(body) body.innerHTML = '<div style="padding:20px; color:#666; text-align:center;">A carregar...</div>';
+
+        document.getElementById('cancelled-ids-modal').style.display = 'flex';
+
+        // Gather all batches for the selected date (active + archived)
+        const activeBts = _activeBatchesCache || {};
+        let archivedBts = {};
+        try {
+            if(!_archivedByDateCache[fD]) {
+                const snap = await db.ref('deleted_batches').orderByChild('dateClean').equalTo(fD).once('value');
+                _archivedByDateCache[fD] = snap.val() || {};
+            }
+            archivedBts = _archivedByDateCache[fD] || {};
+        } catch(e) { /* non-critical */ }
+
+        const allBts = Object.assign({}, archivedBts, activeBts);
+
+        // Collect all cancelled IDs across all batches of this day
+        const rows = [];
+        Object.entries(allBts).forEach(([batchKey, b]) => {
+            if(!(b && b.dateClean === fD)) return;
+            if(!b.cancelled_ids) return;
+            const batchName = b.name || batchKey;
+            const carrier = b.carrier || 'N/A';
+            Object.entries(b.cancelled_ids).forEach(([id, info]) => {
+                rows.push({
+                    id: id,
+                    batchName: batchName,
+                    batchKey: batchKey,
+                    carrier: carrier,
+                    reason: (info && info.reason) ? info.reason : '—',
+                    user: (info && info.user) ? info.user : '—',
+                    time: (info && info.time) ? info.time : '—'
+                });
+            });
+        });
+
+        if(!rows.length) {
+            body.innerHTML = '<div style="padding:20px; color:#666; text-align:center;">Sem IDs cancelados para este dia.</div>';
+            return;
+        }
+
+        // Sort by time desc
+        rows.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+
+        let html = `
+            <div style="margin-bottom:16px; padding:12px 16px; background:#fff5f5; border-radius:10px; border:1px solid #fecaca;">
+                <span style="font-weight:900; font-size:16px; color:#b91c1c;">Total cancelados: ${rows.length}</span>
+            </div>
+            <div class="scroll-area" style="max-height:480px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Lote</th>
+                            <th>Carrier</th>
+                            <th>Motivo</th>
+                            <th>User</th>
+                            <th>Hora</th>
+                            <th>Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+        rows.forEach(r => {
+            const safeId = String(r.id).replace(/'/g, "\\'");
+            const safeBatch = String(r.batchKey).replace(/'/g, "\\'");
+            html += `
+                <tr style="border-left:4px solid #e74c3c;">
+                    <td><b style="color:#b91c1c;">${_escapeHtml(r.id)}</b></td>
+                    <td style="font-size:13px;">${_escapeHtml(r.batchName)}</td>
+                    <td>${_escapeHtml(r.carrier)}</td>
+                    <td style="font-size:13px; color:#666;">${_escapeHtml(r.reason)}</td>
+                    <td style="font-size:13px;">${_escapeHtml(r.user)}</td>
+                    <td style="font-size:13px;">${_escapeHtml(r.time)}</td>
+                    <td><button class="btn-small" style="background:var(--accent); padding:8px 10px;" onclick="closeModal('cancelled-ids-modal'); openEditModal('${safeBatch}', false)">VER LOTE</button></td>
+                </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+
+    } catch(e) {
+        console.error('openCancelledIdsModal error:', e);
+        const body = document.getElementById('cancelled-ids-body');
+        if(body) body.innerHTML = '<div style="color:red; padding:20px;">Erro ao carregar dados.</div>';
+    }
+}
+window.openCancelledIdsModal = openCancelledIdsModal;
+
+
 let _activeBatchesRef = null;
 let _activeBatchesCb  = null;
 let _activeBatchesCache = {};
@@ -3889,7 +4000,7 @@ function closeModal(id) {
   if(id === 'edit-batch-modal') stopEditBatchListener();
 }
     function updateDashboardStats(all, fD) { 
-        let nP = 0, nR = 0, nK = 0, nReadyPick = 0;
+        let nP = 0, nR = 0, nK = 0, nReadyPick = 0, nCancelled = 0;
         for(let k in all) {
             let b = all[k];
             if(!(b && b.dateClean === fD)) continue;
@@ -3899,6 +4010,7 @@ function closeModal(id) {
             nK += stats.done;
             if(String(b.status || '').toUpperCase() === 'READY_TO_PACK') nR += stats.pending;
             if(String(b.status || '').toUpperCase() === 'PENDING_PICK') nReadyPick += 1;
+            if(b.cancelled_ids) nCancelled += Object.keys(b.cancelled_ids).length;
         }
 
         document.getElementById('card-printed').innerText = nP;
@@ -3906,6 +4018,8 @@ function closeModal(id) {
         document.getElementById('card-packed').innerText = nK;
         const readyPickEl = document.getElementById('card-ready-pick');
         if(readyPickEl) readyPickEl.innerText = nReadyPick;
+        const cancelledEl = document.getElementById('card-cancelled');
+        if(cancelledEl) cancelledEl.innerText = nCancelled;
         _updateOverviewFilterUI();
     }
     function updateSelects(bts, fD) {
