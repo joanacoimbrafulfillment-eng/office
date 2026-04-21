@@ -779,6 +779,10 @@
     </div>
 
     <button class="btn-submit" onclick="createBatch()">CREATE BATCH</button>
+    <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
+      <button class="btn-submit" style="background:#1a7431; flex:1;" onclick="saveBatchExcel()">💾 GUARDAR EXCEL</button>
+      <button class="btn-submit" style="background:#7b2fa8; flex:1;" onclick="printPickingList()">🖨️ IMPRIMIR PICKING</button>
+    </div>
 
     <hr style="margin:30px 0;">
 
@@ -4272,6 +4276,125 @@ function closeModal(id) {
         document.getElementById('off-order-meta').value="";
 }
 
+    // ── GUARDAR EXCEL ──────────────────────────────────────────────────────────
+    function saveBatchExcel() {
+        const n  = (document.getElementById('off-batch-name').value.trim() || 'BATCH');
+        const c  = (document.getElementById('off-carrier-select').value || '');
+        const tD = (document.getElementById('off-batch-date').value || _nowDateClean());
+
+        const rows = [];
+        document.getElementById('off-products-list').value.split('\n').forEach(l => {
+            const p = l.split('\t');
+            if (p.length >= 2 && p[0].trim()) {
+                rows.push({
+                    SKU:      p[0].trim().toUpperCase(),
+                    QTY:      parseInt(p[1]) || 0,
+                    POSICAO:  (p[2] || '??').trim()
+                });
+            }
+        });
+
+        if (!rows.length) return uiAlert('Sem produtos para exportar.');
+
+        rows.sort((a, b) => a.POSICAO.localeCompare(b.POSICAO, undefined, { numeric: true, sensitivity: 'base' }));
+
+        const wb = XLSX.utils.book_new();
+
+        // Title rows (like the Excel shown in image)
+        const now = new Date();
+        const dtStr = tD + '   ' + now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+
+        const sheetData = [
+            [dtStr, '', ''],
+            ['PICKING - ' + c + ' ' + n.toUpperCase(), '', ''],
+            ['PRODUTO', 'Q', 'POSIÇÃO'],
+            ...rows.map(r => [r.SKU, r.QTY, r.POSICAO])
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+        // Column widths
+        ws['!cols'] = [{ wch: 35 }, { wch: 6 }, { wch: 10 }];
+
+        // Merge title cells
+        ws['!merges'] = [
+            { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+            { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } }
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, 'PICKING');
+
+        // Segunda folha: IDs
+        const idRows = [['ID', 'CLIENTE', 'CONTEÚDO']];
+        document.getElementById('off-order-meta').value.split('\n').forEach(l => {
+            const p = l.split('\t');
+            if (p.length >= 1 && p[0].trim()) {
+                idRows.push([p[0].trim(), p[1] || '', p[2] || '']);
+            }
+        });
+        const ws2 = XLSX.utils.aoa_to_sheet(idRows);
+        ws2['!cols'] = [{ wch: 20 }, { wch: 30 }, { wch: 40 }];
+        XLSX.utils.book_append_sheet(wb, ws2, 'IDs');
+
+        const filename = 'PICKING_' + c + '_' + n.replace(/\s+/g,'_') + '_' + tD + '.xlsx';
+        XLSX.writeFile(wb, filename);
+    }
+
+    // ── IMPRIMIR PICKING ───────────────────────────────────────────────────────
+    function printPickingList() {
+        const n  = (document.getElementById('off-batch-name').value.trim() || 'BATCH');
+        const c  = (document.getElementById('off-carrier-select').value || '');
+        const tD = (document.getElementById('off-batch-date').value || _nowDateClean());
+
+        const rows = [];
+        document.getElementById('off-products-list').value.split('\n').forEach(l => {
+            const p = l.split('\t');
+            if (p.length >= 2 && p[0].trim()) {
+                rows.push({
+                    sku: p[0].trim().toUpperCase(),
+                    qty: parseInt(p[1]) || 0,
+                    pos: (p[2] || '??').trim()
+                });
+            }
+        });
+
+        if (!rows.length) return uiAlert('Sem produtos para imprimir.');
+
+        rows.sort((a, b) => a.pos.localeCompare(b.pos, undefined, { numeric: true, sensitivity: 'base' }));
+
+        const now = new Date();
+        const dtStr = tD + '   ' + now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+
+        const rowsHtml = rows.map(r =>
+            `<tr><td>${r.sku}</td><td style="text-align:center;">${r.qty}</td><td style="text-align:center;">${r.pos}</td></tr>`
+        ).join('');
+
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>PICKING - ${c} ${n}</title>
+<style>
+  body { font-family: Calibri, Arial, sans-serif; margin: 20px; font-size: 13px; }
+  h1 { font-size: 16px; font-weight: bold; text-align: center; margin: 4px 0 12px; }
+  .dt { font-size: 12px; text-align: right; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f1f3f5; border: 1px solid #bbb; padding: 6px 10px; font-weight: bold; font-size: 13px; }
+  td { border: 1px solid #ccc; padding: 5px 10px; }
+  tr:nth-child(even) td { background: #f9f9f9; }
+  @media print { body { margin: 10mm; } }
+</style></head><body>
+<div class="dt">${dtStr}</div>
+<h1>PICKING - ${c} ${n.toUpperCase()}</h1>
+<table>
+  <thead><tr><th>PRODUTO</th><th style="text-align:center;">Q</th><th style="text-align:center;">POSIÇÃO</th></tr></thead>
+  <tbody>${rowsHtml}</tbody>
+</table>
+<script>window.onload=function(){window.print();}<\/script>
+</body></html>`;
+
+        const w = window.open('', '_blank', 'width=700,height=700');
+        if (w) { w.document.write(html); w.document.close(); }
+        else uiAlert('O browser bloqueou o popup. Permite popups para este site.');
+    }
+
 function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: _nowDateClean() }).then(() => { resetScan(); loadPrePackHistory(); }); }
     let __offReturnRef = null, __offReturnCb = null;
     function loadRecentReturns() {
@@ -5287,3 +5410,4 @@ window.exportMasterDB = exportMasterDB;
 </script>
 </body>
 </html>
+
