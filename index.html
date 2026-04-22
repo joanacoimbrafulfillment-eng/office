@@ -2279,7 +2279,7 @@ function loadPerformanceStats() {
             db.ref('registos').orderByChild('dateClean').equalTo(date).once('value'),
             db.ref('pre_packing').orderByChild('dateClean').equalTo(date).once('value')
         ]).then(([snap, preSnap]) => {
-            Object.values(snap.val() || {}).forEach(r => { if(!stats[r.user]) stats[r.user] = { p:0, r:0, pre:0 }; if(r.mode === 'PACKING') stats[r.user].p++; if(r.mode === 'RETURN') stats[r.user].r++; });
+            Object.values(snap.val() || {}).forEach(r => { if(!stats[r.user]) stats[r.user] = { p:0, r:0, pre:0 }; if(r.mode === 'PACKING') stats[r.user].p++; if(r.mode === 'RETURN' || r.mode === 'RETURNS' || r.mode === 'RETURNED') stats[r.user].r++; });
             Object.values(preSnap.val() || {}).forEach(p => { if(!stats[p.user]) stats[p.user] = { p:0, r:0, pre:0 }; stats[p.user].pre++; });
             tbody.innerHTML = "";
             Object.keys(stats).sort().forEach(u => { const s = stats[u]; tbody.innerHTML += `<tr><td><b>${u}</b></td><td>${s.p}</td><td>${s.r}</td><td>${s.pre}</td><td>${s.p+s.r+s.pre}</td></tr>`; });
@@ -4406,7 +4406,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         __offReturnCb = snap => {
             tbody.innerHTML = "";
             const rows = [];
-            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; if((r.mode||'').toUpperCase()!=='RETURN' || r.dateClean!==today) return; rows.push({k,r}); });
+            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if((m!=='RETURN' && m!=='RETURNS' && m!=='RETURNED') || r.dateClean!==today) return; rows.push({k,r}); });
             rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; });
         };
         __offReturnRef.on('value', __offReturnCb);
@@ -4521,7 +4521,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 
   function _buildDailySummary(dateClean, regList, ppList){
     var packed = regList.filter(function(r){ return r && r.mode === 'PACKING'; });
-    var returns = regList.filter(function(r){ return r && (r.mode === 'RETURN' || r.mode === 'RETURNS'); });
+    var returns = regList.filter(function(r){ return r && (r.mode === 'RETURN' || r.mode === 'RETURNS' || r.mode === 'RETURNED'); });
 
     var prepack = ppList; // pre_packing entries
 
@@ -5410,4 +5410,3 @@ window.exportMasterDB = exportMasterDB;
 </script>
 </body>
 </html>
-
