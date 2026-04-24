@@ -3991,19 +3991,16 @@ function showMetadata(id) {
             _invMonthKey: _invMonthKey
         });
 
-        // 2) Write archive (best-effort). We keep the same key so Inventory can use sourceId=batchKey.
-        await db.ref('deleted_batches/' + id).set(archive);
+        // 2) Guardar em purged_batches (lotes apagados por erro — NÃO é arquivo normal).
+        //    Não vai para deleted_batches para não contaminar o histórico/search/relatórios.
+        await db.ref('purged_batches/' + id).set(archive);
 
         // 3) Remove from active_batches so it disappears from WH picking immediately
         await db.ref('active_batches/' + id).remove();
 
-        // Invalidate merged batch cache so search picks up the move immediately
+        // Invalidar cache local
         __allBatchesCache = null;
-        // Também invalidar cache do overview para a data deste lote
-        try{
-            const archivedBatch = (await db.ref('deleted_batches/' + id).once('value')).val();
-            if(archivedBatch && archivedBatch.dateClean) delete _archivedByDateCache[archivedBatch.dateClean];
-        }catch(_e){}
+        try{ if(archive && archive.dateClean) delete _archivedByDateCache[archive.dateClean]; }catch(_e){}
 
         // cleanup local state
         try{
