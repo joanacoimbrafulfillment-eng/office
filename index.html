@@ -1185,9 +1185,132 @@ document.addEventListener('click', (e) => {
     });
 
     async function handleLogin() {
-        const e = document.getElementById('login-email').value, p = document.getElementById('login-pass').value;
-        try { await auth.signInWithEmailAndPassword(e, p); } catch(e) { uiAlert("Invalid credentials."); }
+        const email = document.getElementById('login-email').value.trim();
+        const pass = document.getElementById('login-pass').value;
+
+        try {
+            await auth.signInWithEmailAndPassword(email, pass);
+
+            // Reutiliza as mesmas credenciais do login principal para os sistemas usados em IMPORTAR ENCOMENDAS.
+            // A password fica apenas em memória desta página, nunca em localStorage/sessionStorage.
+            if (typeof window.offRememberImportCredentials === 'function') {
+                window.offRememberImportCredentials(email, pass);
+            }
+            if (typeof window.offAutoLoginImportSystems === 'function') {
+                window.offAutoLoginImportSystems(email, pass, { attempts: 30, interval: 300, silent: true });
+            }
+        } catch(err) {
+            uiAlert("Invalid credentials.");
+        }
     }
+
+    window.__offImportAutoLoginCreds = null;
+
+    window.offRememberImportCredentials = function(email, pass) {
+        email = String(email || '').trim();
+        pass = String(pass || '');
+        if (!email || !pass) return;
+        window.__offImportAutoLoginCreds = { email: email, pass: pass };
+    };
+
+    function __offAutoSleep(ms) {
+        return new Promise(function(resolve){ window.setTimeout(resolve, ms); });
+    }
+
+    window.offAutoLoginImportSystems = async function(email, pass, opts) {
+        opts = opts || {};
+        email = String(email || '').trim();
+        pass = String(pass || '');
+        if (!email || !pass) return { organizer:false, warehouse:false };
+
+        window.offRememberImportCredentials(email, pass);
+
+        const attempts = Number(opts.attempts || 20);
+        const interval = Number(opts.interval || 300);
+        const result = { organizer:false, warehouse:false };
+
+        // Em ficheiros grandes abertos em file://, o utilizador pode carregar em SIGN IN
+        // antes dos scripts do Organizador/Warehouse estarem todos registados no window.
+        // Por isso esperamos/repetimos até as funções existirem.
+        for (let i = 0; i < attempts; i++) {
+            const hasOrg = typeof window.offOrganizerLoginWithCredentials === 'function';
+            const hasWh = typeof window.offWarehouseLoginWithCredentials === 'function';
+            if (hasOrg && hasWh) break;
+            await __offAutoSleep(interval);
+        }
+
+        try {
+            if (typeof window.offOrganizerLoginWithCredentials === 'function') {
+                const orgRes = await window.offOrganizerLoginWithCredentials(email, pass, { silent: opts.silent !== false });
+                result.organizer = !!(orgRes === true || (orgRes && orgRes.ok));
+            }
+        } catch(e) {
+            console.warn('Auto login Organizador falhou:', e);
+            const orgStatus = document.getElementById('off-import-org-status');
+            if (orgStatus) {
+                orgStatus.textContent = 'Lista Organizador: auto-login falhou';
+                orgStatus.style.color = '#b91c1c';
+            }
+        }
+
+        try {
+            if (typeof window.offWarehouseLoginWithCredentials === 'function') {
+                const whRes = await window.offWarehouseLoginWithCredentials(email, pass);
+                result.warehouse = !!(whRes === true || (whRes && whRes.ok));
+            }
+        } catch(e) {
+            console.warn('Auto login Warehouse falhou:', e);
+            const whStatus = document.getElementById('off-import-wh-status');
+            if (whStatus) {
+                whStatus.textContent = 'Warehouse: auto-login falhou';
+                whStatus.style.color = '#b91c1c';
+            }
+        }
+
+        return result;
+    };
+
+    window.offPromptImportCredentialsAndLogin = async function(opts) {
+        opts = opts || {};
+        if (window.__offImportAutoLoginPromptOpen) return { organizer:false, warehouse:false, promptOpen:true };
+
+        const savedEmail = window.__offImportAutoLoginCreds && window.__offImportAutoLoginCreds.email ? window.__offImportAutoLoginCreds.email : '';
+        const authEmail = (currentUser && currentUser.email) ? currentUser.email : (auth && auth.currentUser && auth.currentUser.email ? auth.currentUser.email : '');
+        const email = String(opts.email || savedEmail || authEmail || '').trim();
+        if (!email) return { organizer:false, warehouse:false, noEmail:true };
+
+        window.__offImportAutoLoginPromptOpen = true;
+        try {
+            const pass = await uiPrompt(
+                'A sessão principal já estava aberta, por isso o OFF não tem a password em memória para entrar automaticamente no Organizador/Warehouse.\n\nConfirma a mesma password uma vez para ativar o login automático nesta página.',
+                '',
+                { title:'Login Importar Encomendas', placeholder:'password', okText:'Login' }
+            );
+            if (pass == null || String(pass) === '') return { organizer:false, warehouse:false, cancelled:true };
+            window.offRememberImportCredentials(email, String(pass));
+            return window.offAutoLoginImportSystems(email, String(pass), {
+                attempts: opts.attempts || 20,
+                interval: opts.interval || 300,
+                silent: opts.silent !== false
+            });
+        } finally {
+            window.__offImportAutoLoginPromptOpen = false;
+        }
+    };
+
+    window.offEnsureImportSystemsLoggedIn = async function(opts) {
+        opts = opts || {};
+        const creds = window.__offImportAutoLoginCreds;
+        if (!creds || !creds.email || !creds.pass) {
+            if (opts.promptIfMissing) return window.offPromptImportCredentialsAndLogin(opts);
+            return { organizer:false, warehouse:false, noCreds:true };
+        }
+        return window.offAutoLoginImportSystems(creds.email, creds.pass, {
+            attempts: opts.attempts || 10,
+            interval: opts.interval || 250,
+            silent: opts.silent !== false
+        });
+    };
 
     function setupUI(email) {
         document.getElementById('login-screen').style.display = 'none';
@@ -4655,11 +4778,7 @@ function closeModal(id) {
             if(!email) return;
             const pass = await uiPrompt('Warehouse password', '', { title:'Warehouse login', placeholder:'password', okText:'Login' });
             if(pass == null) return;
-            await offWhAuth.signInWithEmailAndPassword(String(email).trim(), String(pass));
-            offWhCache.productByName = new Map();
-            offWhCache.pickingByName = new Map();
-            offWhCache.positionCodeById = new Map();
-            offUpdateWarehouseStatus();
+            await offWarehouseLoginWithCredentials(email, pass);
             uiAlert('Warehouse login successful.');
         }catch(e){
             console.error(e);
@@ -4667,6 +4786,25 @@ function closeModal(id) {
             uiAlert('Warehouse login failed.');
         }
     }
+
+    async function offWarehouseLoginWithCredentials(email, pass){
+        if(!offWarehouseReady()) offInitWarehouseFirebase();
+        if (firebase && firebase.auth && firebase.auth.Auth && firebase.auth.Auth.Persistence) {
+            await offWhAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        }
+        await offWhAuth.signInWithEmailAndPassword(String(email).trim(), String(pass));
+        if (offWhAuth.currentUser && typeof offWhAuth.currentUser.getIdToken === 'function') {
+            await offWhAuth.currentUser.getIdToken(true);
+        }
+        offWhCache.productByName = new Map();
+        offWhCache.pickingByName = new Map();
+        offWhCache.positionCodeById = new Map();
+        offUpdateWarehouseStatus();
+        return { ok:true, auth:true };
+    }
+
+    window.offWarehouseLoginWithCredentials = offWarehouseLoginWithCredentials;
+
     async function offWarehouseLogout(){
         try{ if(offWhAuth) await offWhAuth.signOut(); }catch(e){ console.warn(e); }
         offWhCache.productByName = new Map();
@@ -6393,9 +6531,7 @@ window.exportMasterDB = exportMasterDB;
       if (!email) return;
       const pass = await uiPrompt('Password do Organizador', '', { title:'Login Lista Organizador', placeholder:'password', okText:'Login' });
       if (pass == null) return;
-      await offOrgAuth.signInWithEmailAndPassword(String(email).trim(), String(pass));
-      offSetOrganizerStatus('online (' + (offOrgAuth.currentUser.email || offOrgAuth.currentUser.uid) + ')');
-      await offLoadOrganizerLists({ silent:false, force:true });
+      await offOrganizerLoginWithCredentials(email, pass, { silent:false });
       _offUiAlert('Lista do Organizador carregada.');
     }catch(e){
       console.error(e);
@@ -6404,11 +6540,86 @@ window.exportMasterDB = exportMasterDB;
     }
   }
 
+  function offWaitOrganizerAuth(expectedEmail, timeoutMs){
+    timeoutMs = Number(timeoutMs || 6000);
+    expectedEmail = String(expectedEmail || '').trim().toLowerCase();
+    return new Promise(function(resolve){
+      const start = Date.now();
+      const timer = window.setInterval(function(){
+        const u = offOrgAuth && offOrgAuth.currentUser ? offOrgAuth.currentUser : null;
+        const okEmail = !expectedEmail || (u && String(u.email || '').trim().toLowerCase() === expectedEmail);
+        if (u && okEmail) {
+          window.clearInterval(timer);
+          resolve(u);
+        } else if ((Date.now() - start) >= timeoutMs) {
+          window.clearInterval(timer);
+          resolve(u || null);
+        }
+      }, 100);
+    });
+  }
+
+  async function offOrganizerEnsureAuthenticated(email, pass){
+    if (!offOrganizerReady()) offInitOrganizerFirebase();
+
+    const wantedEmail = String(email || '').trim();
+    let user = offOrgAuth.currentUser || null;
+
+    if (!user && wantedEmail && pass != null) {
+      if (firebase && firebase.auth && firebase.auth.Auth && firebase.auth.Auth.Persistence) {
+        await offOrgAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      }
+      await offOrgAuth.signInWithEmailAndPassword(wantedEmail, String(pass));
+      user = await offWaitOrganizerAuth(wantedEmail, 8000);
+    } else if (user) {
+      user = await offWaitOrganizerAuth(user.email || '', 2500);
+    }
+
+    if (user && typeof user.getIdToken === 'function') {
+      await user.getIdToken(true);
+    }
+
+    return user || offOrgAuth.currentUser || null;
+  }
+
+  async function offOrganizerLoginWithCredentials(email, pass, opts){
+    opts = opts || {};
+    const user = await offOrganizerEnsureAuthenticated(email, pass);
+    if (!user) throw new Error('Login Organizador não ficou ativo.');
+    offSetOrganizerStatus('online (' + (user.email || user.uid) + ')');
+
+    const loadResult = await offLoadOrganizerLists({ silent: opts.silent !== false, force:true, skipAutoLogin:true });
+    if (!loadResult || !loadResult.ok) {
+      offSetOrganizerStatus('online, mas sem permissão para ler lista; usando cache/local', true);
+      return { ok:false, auth:true, list:false, error: loadResult ? loadResult.error : null };
+    }
+    return { ok:true, auth:true, list:true };
+  }
+
   async function offLoadOrganizerLists(opts){
     opts = opts || {};
     try{
       if (!offOrganizerReady()) offInitOrganizerFirebase();
-      // Se as regras permitirem leitura sem login, isto funciona. Se exigirem auth, avisa e usa cache/local.
+
+      // As regras do Organizador exigem request.auth != null. Não chamar Firestore
+      // enquanto o Auth secundário do Organizador ainda não tiver currentUser.
+      if (!offOrgAuth.currentUser && !opts.skipAutoLogin && window.__offImportAutoLoginCreds) {
+        const c = window.__offImportAutoLoginCreds;
+        await offOrganizerEnsureAuthenticated(c.email, c.pass);
+      }
+
+      if (!offOrgAuth.currentUser) {
+        offSetOrganizerStatus('sem login no Organizador; usando cache/local', true);
+        return { ok:false, noAuth:true };
+      }
+
+      if (typeof offOrgAuth.currentUser.getIdToken === 'function') {
+        await offOrgAuth.currentUser.getIdToken(true);
+      }
+
+      const authEmail = offOrgAuth.currentUser.email || offOrgAuth.currentUser.uid || 'auth ok';
+      offSetOrganizerStatus('online (' + authEmail + '), a ler lista...');
+
       const mapSnap = await offOrgDb.collection('organizador').doc('map').get();
       const posSnap = await offOrgDb.collection('organizador').doc('pos').get();
       let mapLoaded = 0, posLoaded = 0;
@@ -6435,9 +6646,15 @@ window.exportMasterDB = exportMasterDB;
     }catch(e){
       console.warn('offLoadOrganizerLists failed', e);
       const needsLogin = e && (e.code === 'permission-denied' || String(e.message || '').toLowerCase().includes('permission'));
-      offSetOrganizerStatus(needsLogin ? 'precisa login; usando cache/local' : 'erro; usando cache/local', true);
+      const current = offOrgAuth && offOrgAuth.currentUser ? (offOrgAuth.currentUser.email || offOrgAuth.currentUser.uid || 'auth ok') : '';
+      offSetOrganizerStatus(
+        needsLogin
+          ? (current ? ('login ativo (' + current + '), mas Firestore recusou; confirma regras no projeto organizador-de-produtos') : 'sem login no Organizador; usando cache/local')
+          : 'erro; usando cache/local',
+        true
+      );
       if (!opts.silent) _offUiAlert('Não consegui atualizar a lista do Organizador. Vou usar cache/local. Erro: ' + (e && e.message ? e.message : e));
-      return { ok:false, error:e };
+      return { ok:false, error:e, authEmail: current };
     }
   }
 
@@ -6455,6 +6672,7 @@ window.exportMasterDB = exportMasterDB;
 
   window.offPromptOrganizerLogin = offPromptOrganizerLogin;
   window.offRefreshOrganizerLists = offRefreshOrganizerLists;
+  window.offOrganizerLoginWithCredentials = offOrganizerLoginWithCredentials;
 
   function _offUiAlert(msg){
     if (typeof uiAlert === 'function') uiAlert(msg);
@@ -6616,6 +6834,10 @@ window.exportMasterDB = exportMasterDB;
         return;
       }
 
+      _offSetText('off-import-status', 'A garantir login Organizador/Warehouse...');
+      if (typeof window.offEnsureImportSystemsLoggedIn === 'function') {
+        await window.offEnsureImportSystemsLoggedIn({ silent:true, attempts:10, interval:250, promptIfMissing:true });
+      }
       _offSetText('off-import-status', 'A atualizar lista do Organizador...');
       const orgLoad = await offLoadOrganizerLists({ silent:true, force:true });
       _offSetText('off-import-status', 'A processar encomendas...');
@@ -6705,13 +6927,26 @@ window.exportMasterDB = exportMasterDB;
   };
 
   // Garante que os inline onclick encontram as funções mesmo quando o browser isola scripts locais.
-  window.openImportOrdersModal = function(){
+  window.openImportOrdersModal = async function(){
     const modal = document.getElementById('import-orders-modal');
     if (modal) modal.style.display = 'flex';
     if (typeof offUpdateWarehouseStatus === 'function') offUpdateWarehouseStatus();
+
+    offSetOrganizerStatus('a garantir login...');
+    try {
+      if (typeof window.offEnsureImportSystemsLoggedIn === 'function') {
+        await window.offEnsureImportSystemsLoggedIn({ silent:true, attempts:10, interval:250, promptIfMissing:true });
+      }
+    } catch(e) {
+      console.warn('Ensure import systems login failed:', e);
+    }
+
     offSetOrganizerStatus('a atualizar...');
     offLoadOrganizerLists({ silent:true, force:true }).then(function(res){
-      if (!res || !res.ok) offSetOrganizerStatus('cache/local; faz login se necessário', true);
+      if (!res || !res.ok) {
+        if (res && res.noAuth) offSetOrganizerStatus('sem login no Organizador; confirma password para auto-login', true);
+        else offSetOrganizerStatus('cache/local; se persistir, confirma regras no projeto organizador-de-produtos', true);
+      }
     });
   };
 })();
