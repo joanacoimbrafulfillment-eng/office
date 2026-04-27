@@ -4031,9 +4031,33 @@ function showMetadata(id) {
         }
     }
 
+    // Arquivo normal via Office: guarda em deleted_batches (visível no Overview de datas passadas e no Search)
+    async function archiveCompletedBatch(id){
+        if(!id) return;
+        const snap = await db.ref('active_batches/' + id).once('value');
+        const batch = snap.val();
+        if(!batch) return;
+
+        const archive = Object.assign({}, batch, {
+            _archivedAt: _serverTs(),
+            _archivedBy: (currentUser && currentUser.email) ? currentUser.email : 'UNKNOWN',
+            _archivedType: 'COMPLETED_BATCH'
+        });
+
+        // Guarda em deleted_batches para que o Overview e Search encontrem dados históricos
+        await db.ref('deleted_batches/' + id).set(archive);
+        // Remove de active_batches
+        await db.ref('active_batches/' + id).remove();
+
+        // Invalidar caches
+        __allBatchesCache = null;
+        try{ if(archive.dateClean) delete _archivedByDateCache[archive.dateClean]; }catch(_e){}
+        try{ if(localStorage.getItem('lastPackingBatch') === id) localStorage.removeItem('lastPackingBatch'); }catch(e){}
+    }
+
     async function doArchiveBatches() {
         if(!__batchesToArchive.length) return;
-        if(!await uiConfirm(`Arquivar ${__batchesToArchive.length} lote(s) COMPLETED? O histórico fica disponível no Search.`)) return;
+        if(!await uiConfirm(`Arquivar ${__batchesToArchive.length} lote(s) COMPLETED? O histórico fica disponível no Overview e no Search.`)) return;
 
         const btnDo = document.getElementById('btn-do-archive');
         const statusEl = document.getElementById('archive-status');
@@ -4044,7 +4068,7 @@ function showMetadata(id) {
         for(const b of __batchesToArchive) {
             try {
                 if(statusEl) statusEl.textContent = `A arquivar ${done + 1}/${__batchesToArchive.length}: ${b.name}...`;
-                await archiveAndDeleteBatch(b.key);
+                await archiveCompletedBatch(b.key);  // usa função própria → deleted_batches
                 done++;
             } catch(e) {
                 console.error('Erro a arquivar ' + b.key, e);
@@ -4114,7 +4138,7 @@ function showMetadata(id) {
             _invMonthKey: _invMonthKey
         });
 
-        // 2) Guardar em purged_batches (lotes apagados por erro — NÃO é arquivo normal).
+        // 2) Guardar em purged_batches (lotes apagados manualmente por erro — NÃO é arquivo normal).
         //    Não vai para deleted_batches para não contaminar o histórico/search/relatórios.
         await db.ref('purged_batches/' + id).set(archive);
 
