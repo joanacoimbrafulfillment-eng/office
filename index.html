@@ -1429,12 +1429,11 @@ document.addEventListener('click', (e) => {
             });
 
         } else if (type === 'CARRIERS') {
-            // CARRIERS: export ALL IDs created in batches in the date range,
-            // including batch info, who packed, tracking, contents, status + cancellation reason.
+            // CARRIERS: export IDs in date range — OPTIMIZED v11: filtrar por data em vez de descarregar tudo.
             const [activeBSnap, deletedBSnap, regSnap] = await Promise.all([
-                db.ref('active_batches').once('value'),
-                db.ref('deleted_batches').once('value'),
-                db.ref('registos').once('value')
+                db.ref('active_batches').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
+                db.ref('deleted_batches').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
+                db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value')
             ]);
             // Merge: active takes priority over archived for same key
             const batches = Object.assign({}, deletedBSnap.val() || {}, activeBSnap.val() || {});
@@ -2648,9 +2647,8 @@ function loadPerformanceStats() {
             const newCarrier = String(sel.value || '').trim();
             if(!newCarrier) return uiAlert('Transportadora inválida.');
 
-            // read current to avoid useless writes
-            const snap = await db.ref('active_batches/' + batchId + '/carrier').once('value');
-            const prev = snap.val() || '';
+            // OPTIMIZED v11: usar cache em vez de read isolado
+            const prev = String((_activeBatchesCache && _activeBatchesCache[batchId] && _activeBatchesCache[batchId].carrier) ? _activeBatchesCache[batchId].carrier : '');
             if(String(prev) === String(newCarrier)){
                 _setModalCarrierStatus('Sem alterações (já estava ' + newCarrier + ').', true)
                 return;
@@ -2689,9 +2687,8 @@ function loadPerformanceStats() {
                 return uiAlert('Data inválida. Formato esperado: AAAA-MM-DD');
             }
 
-            // Read current date to avoid useless writes
-            const snap = await db.ref('active_batches/' + batchId + '/dateClean').once('value');
-            const prev = snap.val() || '';
+            // OPTIMIZED v11: usar cache em vez de read isolado
+            const prev = String((_activeBatchesCache && _activeBatchesCache[batchId] && _activeBatchesCache[batchId].dateClean) ? _activeBatchesCache[batchId].dateClean : '');
             if(String(prev) === newDate){
                 _setModalDateStatus('Sem alterações (já era ' + newDate + ').', true);
                 return;
@@ -2738,8 +2735,8 @@ function loadPerformanceStats() {
             const newName = String(inp.value || '').trim();
             if(!newName) return uiAlert('Nome inválido.');
 
-            const snap = await db.ref('active_batches/' + batchId + '/name').once('value');
-            const prev = snap.val() || '';
+            // OPTIMIZED v11: usar cache em vez de read isolado
+            const prev = String((_activeBatchesCache && _activeBatchesCache[batchId] && _activeBatchesCache[batchId].name) ? _activeBatchesCache[batchId].name : '');
             if(String(prev) === newName){
                 _setModalNameStatus('Sem alterações (já era "' + newName + '").', true);
                 return;
@@ -3867,7 +3864,7 @@ function initRealtimeCore(){
             try{ if(typeof updateMasterPreview==='function') updateMasterPreview(); }catch(e){}
         });
 
-        db.ref('config/carriers').on('value', s => {
+        db.ref('config/carriers').once('value').then(s => {
             const carriers = s.val() || ["CTT", "NACEX", "CORREOS"];
 
             // keep a normalized global list for other UIs (ex: Batch Details modal)
