@@ -1441,6 +1441,7 @@ document.addEventListener('click', (e) => {
     function _repCarrierAllowed(carrierVal, selectedSet) {
         if (selectedSet.size === 0) return true; // no filter → all allowed
         const norm = (carrierVal || 'N/A').toString().trim().toUpperCase();
+        if (norm === 'N/A') return true; // Refunds/Returns sem batch passam sempre
         return selectedSet.has(norm);
     }
 
