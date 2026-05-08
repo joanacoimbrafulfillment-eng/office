@@ -5208,7 +5208,7 @@ function closeModal(id) {
         const n = document.getElementById('off-batch-name').value.trim(),
               c = document.getElementById('off-carrier-select').value,
               tD = document.getElementById('off-batch-date').value;
-        if(!n || !tD) return uiAlert("Missing info.");
+        if(!n || !c || !tD) return uiAlert("Missing info. — Nome, Carrier e Data são obrigatórios.");
 
         const key = safeKey(n + "_" + c + "_" + tD + "_" + Date.now());
 
