@@ -644,19 +644,54 @@
         <div id="sec-reports" class="section">
             <div class="card">
                 <h2>📁 Excel Reports & Exports</h2>
-                <div class="grid-2">
+
+                <!-- DATE RANGE + CARRIER FILTER -->
+                <div style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:14px; padding:18px 20px; margin-bottom:22px;">
+                    <div style="display:flex; flex-wrap:wrap; gap:18px; align-items:flex-end;">
+                        <div style="flex:1; min-width:150px;">
+                            <label style="font-weight:900; font-size:12px; color:#475569;">📅 Start Date</label>
+                            <input type="date" id="rep-start-date" style="margin:6px 0 0; height:44px;">
+                        </div>
+                        <div style="flex:1; min-width:150px;">
+                            <label style="font-weight:900; font-size:12px; color:#475569;">📅 End Date</label>
+                            <input type="date" id="rep-end-date" style="margin:6px 0 0; height:44px;">
+                        </div>
+                        <div style="flex:2; min-width:240px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label style="font-weight:900; font-size:12px; color:#475569;">🚚 Transportadoras (filtro opcional)</label>
+                                <div style="display:flex; gap:6px;">
+                                    <button onclick="repSelectAllCarriers()" style="font-size:11px; padding:3px 8px; border:1px solid #3498db; background:#fff; color:#3498db; border-radius:6px; cursor:pointer; font-weight:800;">Todas</button>
+                                    <button onclick="repClearAllCarriers()" style="font-size:11px; padding:3px 8px; border:1px solid #e74c3c; background:#fff; color:#e74c3c; border-radius:6px; cursor:pointer; font-weight:800;">Nenhuma</button>
+                                </div>
+                            </div>
+                            <div id="rep-carrier-checkboxes" style="margin:6px 0 0; display:flex; flex-wrap:wrap; gap:8px; min-height:44px; padding:8px 10px; background:#fff; border:2px solid #ddd; border-radius:10px; align-items:center;">
+                                <span style="color:#aaa; font-size:13px; font-style:italic;" id="rep-carrier-loading">A carregar transportadoras...</span>
+                            </div>
+                            <div style="font-size:11px; color:#888; margin-top:4px;">Se nenhuma selecionada → exporta todas.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:20px;">
                     <div>
                         <h4>1. Export by Date Range</h4>
-                        <label>Start Date:</label><input type="date" id="rep-start-date">
-                        <label>End Date:</label><input type="date" id="rep-end-date">
+                        <p style="color:#666; font-size:13px; margin:0 0 12px;">Packing, Returns e Refunds no período selecionado.</p>
                         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                             <button class="btn-mobile-op btn-op-green" onclick="exportData('ACTIVITY')">Packing/Returns/Refunds</button>
                             <button class="btn-mobile-op btn-op-green" style="background:var(--color-prepack);" onclick="exportData('PREPACK')">Pre-Packing</button>
                         </div>
                     </div>
                     <div>
-                        <h4>2. Transport Carrier Report</h4>
-                        <p>Export ID | Carrier | Timestamps list.</p>
+                        <h4>2. Products by Returns &amp; Refunds</h4>
+                        <p style="color:#666; font-size:13px; margin:0 0 12px;">Rank de produtos devolvidos/reembolsados no período (Produto + Qty). Igual ao Analytics.</p>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                            <button class="btn-mobile-op" style="background:var(--returns);" onclick="exportData('RETURNS_PRODUCTS')">📦 Returns All<br><small style="font-size:11px;font-weight:400;">Produtos devolvidos</small></button>
+                            <button class="btn-mobile-op" style="background:var(--refunds);" onclick="exportData('REFUNDS_PRODUCTS')">💸 Refunds All<br><small style="font-size:11px;font-weight:400;">Produtos reembolsados</small></button>
+                        </div>
+                    </div>
+                    <div>
+                        <h4>3. Transport Carrier Report</h4>
+                        <p style="color:#666; font-size:13px; margin:0 0 12px;">Export ID | Carrier | Timestamps. Usa o filtro de transportadoras acima para selecionar uma ou mais.</p>
                         <button class="btn-mobile-op btn-op-purple" style="width:100%;" onclick="exportData('CARRIERS')">Group by Carrier</button>
                         <small>* Start/End/Confirmed times included.</small>
                     </div>
@@ -1376,6 +1411,7 @@ document.addEventListener('click', (e) => {
         if(id === 'sec-returns') loadRecentReturns();
         if(id === 'sec-refunds') loadRecentRefunds();
         if(id === 'sec-masterdata') setTimeout(() => { try{ updateMasterPreview(); }catch(e){} }, 150);
+        if(id === 'sec-reports') { try{ repLoadCarrierFilter(); }catch(e){} }
 
         // Overview: realtime only for today; old days only when user changes the date
         if(id === 'sec-overview') {
@@ -1389,6 +1425,95 @@ document.addEventListener('click', (e) => {
     function logout() { auth.signOut(); localStorage.removeItem('lastPackingBatch'); }
 
     // --- NEW: EXCEL EXPORT LOGIC WITH START/END TIMES ---
+    // ── REPORTS: Carrier filter helpers ──────────────────────────────────
+    // Populated when the Reports tab is opened; used to render checkboxes.
+    window._repCarrierList = [];
+
+    // Return the set of selected carrier names (UPPERCASE). Empty set = ALL.
+    function _repGetSelectedCarriers() {
+        const boxes = document.querySelectorAll('#rep-carrier-checkboxes input[type=checkbox]');
+        const sel = new Set();
+        boxes.forEach(cb => { if (cb.checked) sel.add(cb.value); });
+        return sel; // empty = all
+    }
+
+    // Returns true if the given carrier value passes the current filter.
+    function _repCarrierAllowed(carrierVal, selectedSet) {
+        if (selectedSet.size === 0) return true; // no filter → all allowed
+        const norm = (carrierVal || 'N/A').toString().trim().toUpperCase();
+        return selectedSet.has(norm);
+    }
+
+    // Build / refresh the checkbox list from the current carrier list.
+    function _repRenderCarrierCheckboxes(carriers) {
+        const box = document.getElementById('rep-carrier-checkboxes');
+        if (!box) return;
+        if (!carriers || carriers.length === 0) {
+            box.innerHTML = "<span style='color:#aaa; font-size:13px; font-style:italic;'>Sem transportadoras configuradas.</span>";
+            return;
+        }
+        box.innerHTML = '';
+        carriers.forEach(function(c) {
+            const id = 'rep-chk-' + c.replace(/\W/g, '_');
+            const label = document.createElement('label');
+            label.style.cssText = 'display:inline-flex; align-items:center; gap:5px; cursor:pointer; background:#f1f5f9; border:1.5px solid #cbd5e1; border-radius:8px; padding:5px 10px; font-size:13px; font-weight:800; user-select:none; transition:background .15s;';
+            label.htmlFor = id;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.id = id;
+            cb.value = c;
+            cb.checked = true; // default: all selected
+            cb.style.cssText = 'width:16px; height:16px; accent-color:var(--accent); cursor:pointer;';
+            cb.addEventListener('change', function() {
+                label.style.background = cb.checked ? '#dbeafe' : '#f1f5f9';
+                label.style.borderColor = cb.checked ? '#3b82f6' : '#cbd5e1';
+            });
+            // initial highlight
+            label.style.background = '#dbeafe';
+            label.style.borderColor = '#3b82f6';
+            label.appendChild(cb);
+            label.appendChild(document.createTextNode(' ' + c));
+            box.appendChild(label);
+        });
+    }
+
+    // Load carriers from Firebase and render checkboxes. Called when Reports tab opens.
+    async function repLoadCarrierFilter() {
+        const box = document.getElementById('rep-carrier-checkboxes');
+        if (!box) return;
+        box.innerHTML = "<span style='color:#aaa; font-size:13px; font-style:italic;'>A carregar...</span>";
+        try {
+            const snap = await db.ref('config/carriers').once('value');
+            const val = snap.val();
+            let carriers = [];
+            if (Array.isArray(val)) carriers = val.filter(Boolean).map(x => String(x).trim().toUpperCase());
+            else if (val && typeof val === 'object') carriers = Object.values(val).filter(Boolean).map(x => String(x).trim().toUpperCase());
+            // Deduplicate and sort
+            carriers = [...new Set(carriers)].sort();
+            window._repCarrierList = carriers;
+            _repRenderCarrierCheckboxes(carriers);
+        } catch(e) {
+            console.warn('repLoadCarrierFilter error:', e);
+            box.innerHTML = "<span style='color:#e74c3c; font-size:13px;'>Erro ao carregar transportadoras.</span>";
+        }
+    }
+
+    window.repSelectAllCarriers = function() {
+        document.querySelectorAll('#rep-carrier-checkboxes input[type=checkbox]').forEach(function(cb) {
+            cb.checked = true;
+            const lbl = cb.closest('label');
+            if (lbl) { lbl.style.background = '#dbeafe'; lbl.style.borderColor = '#3b82f6'; }
+        });
+    };
+    window.repClearAllCarriers = function() {
+        document.querySelectorAll('#rep-carrier-checkboxes input[type=checkbox]').forEach(function(cb) {
+            cb.checked = false;
+            const lbl = cb.closest('label');
+            if (lbl) { lbl.style.background = '#f1f5f9'; lbl.style.borderColor = '#cbd5e1'; }
+        });
+    };
+    // ─────────────────────────────────────────────────────────────────────
+
     async function exportData(type) {
         const start = document.getElementById('rep-start-date').value;
         const end = document.getElementById('rep-end-date').value;
@@ -1396,6 +1521,10 @@ document.addEventListener('click', (e) => {
 
         // Helper: check YYYY-MM-DD in range (inclusive)
         const inRange = (d) => (d && d >= start && d <= end);
+
+        // Carrier filter (empty set = all carriers)
+        const selectedCarriers = _repGetSelectedCarriers();
+        const carrierAllowed = (c) => _repCarrierAllowed(c, selectedCarriers);
 
         if (type === 'ACTIVITY') {
             const [snap, activeBatchSnap, deletedBatchSnap] = await Promise.all([
@@ -1409,6 +1538,7 @@ document.addEventListener('click', (e) => {
             Object.values(snap.val() || {}).forEach(r => {
                 if (inRange(r.dateClean)) {
                     const carrier = (batches[r.batch] && batches[r.batch].carrier) ? batches[r.batch].carrier : "N/A";
+                    if (!carrierAllowed(carrier)) return; // ← filtro transportadora
                     const rawMode = (r.mode || '').toString().toUpperCase();
                     const normalizedMode = (rawMode === 'PACKING') ? 'PACKING' : (_isRefundMode(rawMode) ? 'REFUNDS' : (_isReturnMode(rawMode) ? 'RETURNS' : rawMode));
                     dataToExport.push({
@@ -1457,6 +1587,8 @@ document.addEventListener('click', (e) => {
 
                 const batchName = b.name || batchKey;
                 const carrier = b.carrier || "N/A";
+                if (!carrierAllowed(carrier)) return; // ← filtro transportadora
+
                 const expected = b.expected_ids || [];
                 const orderDetails = b.order_details || {};
                 const cancelled = b.cancelled_ids || {};
@@ -1500,13 +1632,47 @@ document.addEventListener('click', (e) => {
                     dataToExport.push({ Date: p.dateClean, Time: p.time, User: p.user, Product: p.product });
                 }
             });
+
+        } else if (type === 'RETURNS_PRODUCTS' || type === 'REFUNDS_PRODUCTS') {
+            // 1 row per product per day — Qty is the count for that specific day
+            const snap = await db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value');
+            // dayProdMap: { 'YYYY-MM-DD': { product: qty } }
+            const dayProdMap = {};
+            Object.values(snap.val() || {}).forEach(r => {
+                if (!inRange(r.dateClean)) return;
+                const rawMode = (r.mode || '').toString().toUpperCase();
+                const matches = (type === 'RETURNS_PRODUCTS') ? _isReturnMode(rawMode) : _isRefundMode(rawMode);
+                if (!matches) return;
+                const prodsStr = (r.prods || '').toString().trim();
+                if (!prodsStr || prodsStr === 'No Items') return;
+                const dc = r.dateClean; // YYYY-MM-DD
+                if (!dayProdMap[dc]) dayProdMap[dc] = {};
+                prodsStr.split('|').map(x => x.trim()).filter(Boolean).forEach(prod => {
+                    dayProdMap[dc][prod] = (dayProdMap[dc][prod] || 0) + 1;
+                });
+            });
+            // For each day (sorted ascending), rank products by qty desc, emit 1 row per product
+            Object.keys(dayProdMap).sort().forEach(dc => {
+                const parts = dc.split('-');
+                const dateFmt = parts[2] + '/' + parts[1] + '/' + parts[0]; // DD/MM/YYYY
+                const sorted = Object.entries(dayProdMap[dc]).sort((a, b) => b[1] - a[1]);
+                sorted.forEach(([product, qty], i) => {
+                    dataToExport.push({ Date: dateFmt, Product: product, Qty: qty, Rank: i + 1 });
+                });
+            });
         }
 
-        if (dataToExport.length === 0) return uiAlert("No data found for these dates.");
+        // Build filename suffix with selected carriers (if filtered)
+        let carrierSuffix = '';
+        if (selectedCarriers.size > 0) {
+            carrierSuffix = '_' + [...selectedCarriers].join('-');
+        }
+
+        if (dataToExport.length === 0) return uiAlert("No data found for these dates" + (selectedCarriers.size > 0 ? " and selected carriers." : "."));
         const ws = XLSX.utils.json_to_sheet(dataToExport);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Report");
-        XLSX.writeFile(wb, `WH_Export_${type}_${start}_to_${end}.xlsx`);
+        XLSX.writeFile(wb, `WH_Export_${type}${carrierSuffix}_${start}_to_${end}.xlsx`);
     }
 
     // =========================
