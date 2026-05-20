@@ -410,6 +410,7 @@
                         <th>Carrier</th>
                         <th>User</th>
                         <th>Tracking</th>
+                        <th style="width:50px; min-width:50px;">Vol</th>
                         <th>Items / Content</th>
                         <th>Details</th>
                     </tr>
@@ -1551,6 +1552,8 @@ document.addEventListener('click', (e) => {
                         Raw_Mode: r.mode || '',
                         User: r.user,
                         Tracking: r.track,
+                        All_Trackings: r.tracks || r.track || '',
+                        Volumes: r.volumes || 1,
                         Items: r.prods,
                         Carrier: carrier,
                         Batch_Key: r.batch || "GENERAL",
@@ -1612,6 +1615,7 @@ document.addEventListener('click', (e) => {
                         Order_ID: orderId,
                         Customer: det.name || "",
                         Expected_Content: det.content || "",
+                        Volumes: ((b.order_volumes && b.order_volumes[orderId]) || 1),
                         Status: status,
                         Cancel_Reason: cancelInfo ? (cancelInfo.reason || "") : "",
                         Cancelled_By: cancelInfo ? (cancelInfo.user || "") : "",
@@ -1621,6 +1625,7 @@ document.addEventListener('click', (e) => {
                         Packed_Start_Time: packRec ? (packRec.startTime || "") : "",
                         Packed_Confirmed_Time: packRec ? (packRec.endTime || packRec.time || "") : "",
                         Tracking: packRec ? (packRec.track || "") : "",
+                        All_Trackings: packRec ? (packRec.tracks || packRec.track || "") : "",
                         Packed_Items: packRec ? (packRec.prods || "") : ""
                     });
                 });
@@ -2167,6 +2172,18 @@ function _parseIds(raw) {
             if (carrier) lines += "<div style='font-size:14px;'><b>Carrier:</b> " + carrier + "</div>";
             if (packedBy) lines += "<div style='font-size:14px;'><b>Packed by:</b> " + packedBy + "</div>";
             if (tracking) lines += "<div style='font-size:14px;'><b>Tracking:</b> " + tracking + "</div>";
+            // Volumes + all tracks
+            var volumes = s.volumes || 1;
+            var tracks = _fmt(s.tracks || "");
+            if (volumes > 1) {
+                lines += "<div style='margin-top:6px; display:inline-flex; align-items:center; gap:8px; background:#fef3c7; border:1px solid #f59e0b; border-radius:8px; padding:5px 12px;'>"
+                    + "<span style='font-size:18px;'>📦</span>"
+                    + "<span style='font-weight:900; color:#92400e; font-size:14px;'>" + volumes + " VOLUMES</span>"
+                    + "</div>";
+                if (tracks && tracks !== tracking) {
+                    lines += "<div style='font-size:13px; margin-top:4px;'><b>Todos os trackings:</b> <span style='font-family:monospace;'>" + tracks + "</span></div>";
+                }
+            }
             if (cancelReason) lines += "<div style='font-size:14px; color: var(--error);'><b>Cancel:</b> " + cancelReason + "</div>";
             if (last) lines += "<div style='margin-top:8px; font-size:12px; color:#666;'><b>Last event:</b> " + last + "</div>";
 
@@ -2228,6 +2245,19 @@ function _parseIds(raw) {
         var statusF = mst ? mst.value : "ALL";
 
         var summary = searchCache.summaryById[id] || {};
+
+        // If volumes not yet in summary, try to load from Firebase active_batches
+        if((!summary.volumes || summary.volumes <= 1) && summary.batchName) {
+            // find batchKey by iterating batchData if available
+            var batchData = window.__lastBatchDataForSearch || {};
+            Object.entries(batchData).forEach(function(pair) {
+                var b = pair[1] || {};
+                if(b && b.order_volumes && b.order_volumes[id]) {
+                    var v = Number(b.order_volumes[id]);
+                    if(v > 1) summary.volumes = v;
+                }
+            });
+        }
         var sumEl = document.getElementById('id-history-summary');
         if (sumEl) {
             var parts = [];
@@ -2239,6 +2269,13 @@ function _parseIds(raw) {
             if (summary.cancelReason) parts.push("<b>Cancel reason:</b> " + _fmt(summary.cancelReason) + " (" + _fmt(summary.cancelBy) + " @ " + _fmt(summary.cancelAt) + ")");
             if (summary.packedBy) parts.push("<b>Packed by:</b> " + _fmt(summary.packedBy) + " @ " + _fmt(summary.packedAt));
             if (summary.tracking) parts.push("<b>Tracking:</b> " + _fmt(summary.tracking));
+            // Volumes
+            var vols = summary.volumes || 1;
+            if (vols > 1) {
+                parts.push("<span style='background:#f59e0b; color:#fff; padding:2px 10px; border-radius:8px; font-weight:900;'>📦 " + vols + " VOLUMES</span>");
+                var allTracks = _fmt(summary.tracks || summary.tracking || "");
+                if (allTracks) parts.push("<b>Todos os trackings:</b> <span style='font-family:monospace;'>" + allTracks + "</span>");
+            }
             sumEl.innerHTML = parts.join(" &nbsp; | &nbsp; ") || "";
         }
 
@@ -2261,15 +2298,26 @@ function _parseIds(raw) {
         if (tbody) tbody.innerHTML = "";
         filtered.forEach(function(ev){
             if (!tbody) return;
-            tbody.innerHTML += "<tr" + ((_fmt(ev.Type) === "CANCELLED") ? " style='background:#fff0f0; border-left:6px solid var(--error);'" : "") + ">"
+            var isPacking = _fmt(ev.Type) === "PACKING";
+            var isCancelled = _fmt(ev.Type) === "CANCELLED";
+            var evVols = Number(ev.Volumes || 1);
+            var evTracks = _fmt(ev.Tracks || ev.Tracking || "");
+            var trackingCell = isPacking && evVols > 1
+                ? "<span style='font-family:monospace; font-size:12px;'>" + evTracks + "</span>"
+                : _fmt(ev.Tracking);
+            var volCell = (isPacking && evVols > 1)
+                ? `<span style='color:#92400e; font-weight:900; white-space:nowrap;'>📦 ${evVols}</span>`
+                : (Number(ev.Volumes) > 1 ? `<span style='color:#92400e; font-weight:900;'>${Number(ev.Volumes)}</span>` : `<span style='color:#aaa;'>1</span>`);
+            tbody.innerHTML += "<tr" + (isCancelled ? " style='background:#fff0f0; border-left:6px solid var(--error);'" : "") + ">"
                 + "<td>" + _fmt(ev.DateTime) + "</td>"
-                + "<td><b style='" + ((_fmt(ev.Type) === "CANCELLED") ? "color:var(--error);" : "") + "'>" + _fmt(ev.Type) + "</b></td>"
+                + "<td><b style='" + (isCancelled ? "color:var(--error);" : "") + "'>" + _fmt(ev.Type) + "</b></td>"
                 + "<td>" + _fmt(ev.Batch) + "</td>"
                 + "<td>" + _fmt(ev.Carrier) + "</td>"
                 + "<td>" + _fmt(ev.User) + "</td>"
-                + "<td>" + _fmt(ev.Tracking) + "</td>"
+                + "<td>" + trackingCell + "</td>"
+                + "<td>" + volCell + "</td>"
                 + "<td><small>" + _fmt(ev.Items_or_Content) + "</small></td>"
-                + "<td><small style='" + ((_fmt(ev.Type) === "CANCELLED") ? "color:var(--error); font-weight:900;" : "") + "'>" + _fmt(ev.Details) + "</small></td>"
+                + "<td><small style='" + (isCancelled ? "color:var(--error); font-weight:900;" : "") + "'>" + _fmt(ev.Details) + "</small></td>"
                 + "</tr>";
         });
 
@@ -2360,6 +2408,7 @@ function _parseIds(raw) {
         // Batch metadata for carrier/name enrichment
         // Carrega active_batches + deleted_batches para garantir histórico completo mesmo após arquivo
         var batchData = await _loadAllBatchesForSearch();
+        window.__lastBatchDataForSearch = batchData;
 
 
         function _eventKey(ev){
@@ -2541,6 +2590,8 @@ function _parseIds(raw) {
                     Carrier: _fmt(carrier),
                     User: _fmt(r.user),
                     Tracking: _fmt(r.track),
+                    Tracks: _fmt(r.tracks || r.track),
+                    Volumes: Number(r.volumes || 1),
                     Items_or_Content: _fmt(r.prods),
                     Details: (type === "PACKING")
                         ? ("Start: " + _fmt(r.startTime || r.time) + " | Confirm: " + _fmt(r.endTime || r.time))
@@ -2613,6 +2664,7 @@ Object.entries(batchData).forEach(function(pair){
                         var od = (b.order_details && b.order_details[sid]) ? b.order_details[sid] : {};
                         var batchName = _fmt(b.name || bKey);
                         var carrier = _fmt(b.carrier || "N/A");
+                        var batchVols = (b.order_volumes && b.order_volumes[sid]) ? Number(b.order_volumes[sid]) : 1;
 
                         // Prefer createdAt (real creation timestamp), else fall back to batch date.
                         var dtRaw = _fmt(b.createdAt || "");
@@ -2637,6 +2689,7 @@ Object.entries(batchData).forEach(function(pair){
                             Carrier: carrier,
                             User: _fmt(b.createdBy || ""),
                             Tracking: "",
+                            Volumes: batchVols,
                             Items_or_Content: _fmt((od && od.content) ? od.content : ""),
                             Details: "Added to batch | Customer: " + _fmt((od && od.name) ? od.name : ""),
                             Customer: _fmt((od && od.name) ? od.name : "")
@@ -2709,6 +2762,19 @@ Object.entries(batchData).forEach(function(pair){
                     summary.packedBy = _fmt(packEv.User);
                     summary.packedAt = _fmt(packEv.DateTime);
                     summary.tracking = _fmt(packEv.Tracking);
+                    summary.tracks = _fmt(packEv.Tracks || packEv.Tracking);
+                    summary.volumes = Number(packEv.Volumes || 1);
+                }
+
+                // volumes defined in batch (even if not yet packed)
+                var createdEvWithVols = _findLast(events, function(ev){ return _fmt(ev.Type) === "OFFICE / BATCH_CREATED" && ev.Volumes > 1; });
+                if(createdEvWithVols && !summary.volumes) {
+                    summary.volumes = Number(createdEvWithVols.Volumes);
+                }
+                // Also check all batch events for volumes (catches latestCreated too)
+                if(!summary.volumes || summary.volumes <= 1) {
+                    var anyVolEv = _findLast(events, function(ev){ return Number(ev.Volumes) > 1; });
+                    if(anyVolEv) summary.volumes = Number(anyVolEv.Volumes);
                 }
             }
 
@@ -3091,6 +3157,17 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
     }
     window.editOrderField = editOrderField;
 
+    async function setOrderVolumes(batchId, orderId, volumes) {
+        const v = Math.max(1, parseInt(volumes) || 1);
+        try {
+            await db.ref(`active_batches/${batchId}/order_volumes/${orderId}`).set(v);
+            logBatchAction(batchId, `Volumes do ID ${orderId} alterado para ${v}`);
+        } catch(e) {
+            uiAlert("Erro ao guardar volumes: " + e.message);
+        }
+    }
+    window.setOrderVolumes = setOrderVolumes;
+
 function logBatchAction(bId, msg) {
         const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "SYSTEM";
         return db.ref(`active_batches/${bId}/history`).push({ time: _nowDateTime(), user: uname, msg })
@@ -3221,11 +3298,12 @@ function openEditModal(batchId, readOnly = false) {
             });
             const idsList = document.getElementById('edit-ids-list');
             window._orderEditStore = {};
-            let html = '<table><thead><tr><th>ID</th><th>Cliente</th><th>Content</th><th>Status</th><th>Ação</th></tr></thead><tbody>';
+            let html = '<table><thead><tr><th>ID</th><th>Cliente</th><th>Content</th><th>Vol</th><th>Status</th><th>Ação</th></tr></thead><tbody>';
             (b.expected_ids||[]).forEach((id, _oidx) => {
                 const isPack = (b.processed_ids && b.processed_ids[id]);
                 const isCancelled = (b.cancelled_ids && b.cancelled_ids[id]);
                 const det = (b.order_details||{})[id] || {name:"N/A", content:"N/A"};
+                const currentVol = ((b.order_volumes||{})[id]) || 1;
                 const cancelInfo = isCancelled ? b.cancelled_ids[id] : null;
 
                 const canEdit = (!effectiveReadOnly && currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'));
@@ -3266,7 +3344,15 @@ function openEditModal(batchId, readOnly = false) {
                     : (canEdit
                         ? `<span style="display:flex;gap:6px;flex-wrap:wrap;">${isPack ? `<button class="btn-small" style="background:#0ea5e9;" onclick="openPackedItemsEditor('${batchId}', '${id}')">EDIT ITEMS</button>` : ''}<button class="btn-small btn-delete" onclick="cancelBatchId('${batchId}', '${id}', ${isPack ? 'true' : 'false'})">${isPack ? 'CANCEL (PACKED)' : 'CANCEL'}</button>${deleteBtn}</span>`
                         : '-');
-                html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
+
+                const volCell = (canEdit && !isCancelled)
+                    ? `<span style="display:flex;align-items:center;gap:4px;">
+                         <input type="number" min="1" max="9" style="width:54px;text-align:center;font-weight:900;font-size:15px;padding:4px;" value="${currentVol}"
+                           onchange="setOrderVolumes('${batchId}','${id}',parseInt(this.value)||1)">
+                       </span>`
+                    : `<b style="font-size:15px;">${currentVol}</b>`;
+
+                html += `<tr><td>${idCell}</td><td>${nameCell}</td><td>${contentCell}</td><td>${volCell}</td><td>${statusCell}</td><td>${actionCell}</td></tr>`;
             });
             idsList.innerHTML = html + '</tbody></table>';
             const logBox = document.getElementById('qty-modification-log'); logBox.innerHTML = "";
