@@ -526,6 +526,28 @@
                 <h2 class="mt-0">🌍 Warehouse Overview</h2>
                 <input type="date" id="global-date-filter" onchange="syncGlobalData()" style="width:220px;">
             </div>
+            <!-- QUICK ID SEARCH -->
+            <div style="margin-top:18px; margin-bottom:0;">
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <div style="position:relative; flex:1; max-width:520px;">
+                        <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:18px; pointer-events:none;">🔍</span>
+                        <input
+                            type="text"
+                            id="overview-id-search-input"
+                            placeholder="Pesquisar ID de encomenda..."
+                            style="width:100%; padding:13px 14px 13px 44px; border:2px solid #ddd; border-radius:12px; font-size:16px; box-sizing:border-box; transition:border-color .15s;"
+                            oninput="overviewIdSearchLive(this.value)"
+                            onkeydown="if(event.key==='Enter') overviewIdSearchGo()"
+                            onfocus="this.style.borderColor='var(--accent)'"
+                            onblur="this.style.borderColor='#ddd'"
+                        >
+                    </div>
+                    <button class="btn-small" style="background:var(--accent); padding:13px 20px; font-size:14px; border-radius:12px;" onclick="overviewIdSearchGo()">IR AO LOTE</button>
+                    <button class="btn-small" style="background:#6c757d; padding:13px 14px; font-size:14px; border-radius:12px; display:none;" id="overview-id-search-clear" onclick="overviewIdSearchClear()">✕</button>
+                </div>
+                <div id="overview-id-search-result" style="margin-top:8px; font-size:14px; font-weight:700; min-height:22px;"></div>
+            </div>
+
             <div class="dashboard-grid">
                 <div class="dash-card overview-click-card active" id="dash-card-printed" onclick="clearOverviewFilter()" title="Ver todos os lotes do dia"> <h2 id="card-printed">0</h2> <p>Total Printed</p> </div>
                 <div class="dash-card overview-click-card" id="dash-card-ready" onclick="setOverviewFilter('PENDING_PACKING')" title="Ver lotes em Pending Packing"> <h2 id="card-ready">0</h2> <p>Pending Packing</p> </div>
@@ -4068,6 +4090,81 @@ async function openCancelledIdsModal() {
     }
 }
 window.openCancelledIdsModal = openCancelledIdsModal;
+
+
+// ================================
+// 🔎 OVERVIEW: QUICK ID SEARCH
+// ================================
+function overviewIdSearchLive(val) {
+    const resultEl = document.getElementById('overview-id-search-result');
+    const clearBtn = document.getElementById('overview-id-search-clear');
+    if (!resultEl) return;
+    const id = String(val || '').trim();
+    if (clearBtn) clearBtn.style.display = id ? 'inline-block' : 'none';
+    if (!id) { resultEl.textContent = ''; return; }
+
+    // Live feedback: procura em cache
+    const found = _overviewFindBatchForId(id);
+    if (found) {
+        resultEl.innerHTML = '✅ ID encontrado em: <b>' + _escapeHtml(found.batchName) + '</b> (' + _escapeHtml(found.carrier) + ')';
+        resultEl.style.color = '#166534';
+    } else {
+        resultEl.innerHTML = '<span style="color:#92400e;">Não encontrado nos lotes carregados. Prima ENTER para pesquisar.</span>';
+        resultEl.style.color = '#92400e';
+    }
+}
+
+function overviewIdSearchGo() {
+    const inp = document.getElementById('overview-id-search-input');
+    const resultEl = document.getElementById('overview-id-search-result');
+    if (!inp || !resultEl) return;
+    const id = String(inp.value || '').trim();
+    if (!id) return;
+
+    const found = _overviewFindBatchForId(id);
+    if (found) {
+        resultEl.innerHTML = '✅ ID <b>' + _escapeHtml(id) + '</b> encontrado em: <b>' + _escapeHtml(found.batchName) + '</b> — a abrir lote...';
+        resultEl.style.color = '#166534';
+        setTimeout(function() { openEditModal(found.batchId, false); }, 180);
+    } else {
+        resultEl.innerHTML = '❌ ID <b>' + _escapeHtml(id) + '</b> não encontrado em nenhum lote da data selecionada.';
+        resultEl.style.color = '#b91c1c';
+    }
+}
+
+function overviewIdSearchClear() {
+    const inp = document.getElementById('overview-id-search-input');
+    const resultEl = document.getElementById('overview-id-search-result');
+    const clearBtn = document.getElementById('overview-id-search-clear');
+    if (inp) inp.value = '';
+    if (resultEl) { resultEl.textContent = ''; resultEl.style.color = ''; }
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (inp) inp.focus();
+}
+
+function _overviewFindBatchForId(id) {
+    if (!id || !_activeBatchesCache) return null;
+    const cache = _activeBatchesCache;
+    const batchIds = Object.keys(cache);
+    for (let i = 0; i < batchIds.length; i++) {
+        const batchId = batchIds[i];
+        const batch = cache[batchId];
+        if (!batch) continue;
+        const ids = batch.expected_ids;
+        if (Array.isArray(ids) && ids.indexOf(id) !== -1) {
+            return { batchId: batchId, batchName: batch.name || batchId, carrier: batch.carrier || 'N/A' };
+        }
+        // Also check processed_ids keys (already packed)
+        if (batch.processed_ids && batch.processed_ids[id] !== undefined) {
+            return { batchId: batchId, batchName: batch.name || batchId, carrier: batch.carrier || 'N/A' };
+        }
+    }
+    return null;
+}
+
+window.overviewIdSearchLive = overviewIdSearchLive;
+window.overviewIdSearchGo   = overviewIdSearchGo;
+window.overviewIdSearchClear = overviewIdSearchClear;
 
 
 let _activeBatchesRef = null;
