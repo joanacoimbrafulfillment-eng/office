@@ -1501,10 +1501,22 @@ document.addEventListener('click', (e) => {
         });
     }
 
-    // Load carriers from Firebase and render checkboxes. Called when Reports tab opens.
+    // Load carriers for Reports tab.
+    // OPTIMISED: usa _carriersList ja carregado no boot (config listener em initRealtimeCore).
+    // So vai ao Firebase se o cache estiver vazio (ex: primeira abertura muito rapida).
     async function repLoadCarrierFilter() {
         const box = document.getElementById('rep-carrier-checkboxes');
         if (!box) return;
+
+        // Se ja temos a lista em cache, usa directamente sem download
+        if (Array.isArray(_carriersList) && _carriersList.length > 0) {
+            const carriers = [..._carriersList];
+            window._repCarrierList = carriers;
+            _repRenderCarrierCheckboxes(carriers);
+            return;
+        }
+
+        // Fallback: cache ainda vazio - faz 1 read e guarda em _carriersList
         box.innerHTML = "<span style='color:#aaa; font-size:13px; font-style:italic;'>A carregar...</span>";
         try {
             const snap = await db.ref('config/carriers').once('value');
@@ -1512,8 +1524,8 @@ document.addEventListener('click', (e) => {
             let carriers = [];
             if (Array.isArray(val)) carriers = val.filter(Boolean).map(x => String(x).trim().toUpperCase());
             else if (val && typeof val === 'object') carriers = Object.values(val).filter(Boolean).map(x => String(x).trim().toUpperCase());
-            // Deduplicate and sort
             carriers = [...new Set(carriers)].sort();
+            _carriersList = carriers;
             window._repCarrierList = carriers;
             _repRenderCarrierCheckboxes(carriers);
         } catch(e) {
@@ -3047,7 +3059,8 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
             ]);
 
             if(batchUsesPickingByIds(batch)){
-                await recalcBatchInventoryFromIds(batchId, { markReprint:true, logMsg:'PICKING RECALCULADA POR ELIMINAR ID: ' + orderId });
+                // OPTIMISED: passa batch ja lido para evitar read extra
+                await recalcBatchInventoryFromIds(batchId, { cachedBatch: batch, markReprint:true, logMsg:'PICKING RECALCULADA POR ELIMINAR ID: ' + orderId });
             } else {
                 logBatchAction(batchId, 'ID ELIMINADO: ' + orderId);
             }
@@ -5357,10 +5370,17 @@ function closeModal(id) {
         return inv;
     }
 
+    // OPTIMISED: aceita opts.cachedBatch para evitar read ao Firebase quando o caller ja tem o batch em cache.
     async function recalcBatchInventoryFromIds(batchId, opts){
         try{
-            const snap = await db.ref('active_batches/' + batchId).once('value');
-            const batch = snap.val() || {};
+            // Usa batch em cache se disponivel; caso contrario faz read normal (comportamento original preservado)
+            let batch;
+            if(opts && opts.cachedBatch) {
+                batch = opts.cachedBatch;
+            } else {
+                const snap = await db.ref('active_batches/' + batchId).once('value');
+                batch = snap.val() || {};
+            }
             // Backwards-compatible guard: old batches have no order_items_by_id, so do nothing.
             if(!batch.order_items_by_id) return { skipped:true, reason:'legacy_batch' };
             const inv = computeInventoryFromOrderItems(batch.order_items_by_id, batch.cancelled_ids || {});
@@ -6045,11 +6065,11 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             await db.ref(`active_batches/${batchId}/processed_ids/${orderId}`).remove();
 
             // Recalculate picking only for new batches that opted into order_items_by_id.
+            // OPTIMISED: usa _activeBatchesCache em vez de 2 reads ao Firebase.
             try{
-                const bSnap0 = await db.ref(`active_batches/${batchId}`).once('value');
-                const b0 = bSnap0.val() || {};
+                const b0 = (_activeBatchesCache && _activeBatchesCache[batchId]) ? _activeBatchesCache[batchId] : {};
                 if(batchUsesPickingByIds(b0)){
-                    await recalcBatchInventoryFromIds(batchId, { markReprint:true, logMsg:`CANCELLED ID: ${orderId} | Reason: ${payload.reason} | PICKING RECALCULADA` });
+                    await recalcBatchInventoryFromIds(batchId, { cachedBatch: b0, markReprint:true, logMsg:`CANCELLED ID: ${orderId} | Reason: ${payload.reason} | PICKING RECALCULADA` });
                 } else {
                     logBatchAction(batchId, `CANCELLED ID: ${orderId} | Reason: ${payload.reason}`);
                 }
@@ -6059,9 +6079,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             }
 
             // NEW: persistent ID history so SEARCH shows cancelled even if the ID is recreated in new batches
+            // OPTIMISED: usa cache em vez de read isolado
             try{
-                const bSnap = await db.ref(`active_batches/${batchId}`).once('value');
-                const b = bSnap.val() || {};
+                const b = (_activeBatchesCache && _activeBatchesCache[batchId]) ? _activeBatchesCache[batchId] : {};
                 const dc = _nowDateClean();
                 const tm = _nowTime();
                 await pushIdHistory(orderId, {
