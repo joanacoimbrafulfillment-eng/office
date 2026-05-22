@@ -924,7 +924,13 @@
     </div>
 
     <div class="grid-2">
-      <textarea id="off-products-list" rows="12" placeholder="SKU [TAB] Qty [TAB] Pos"></textarea>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label style="font-weight:900; font-size:12px; color:#666;">SKU / QTY / POS</label>
+          <button id="off-copy-skuqtypos-btn" onclick="copySkuQtyPos()" style="background:#0ea5e9; color:white; border:none; border-radius:8px; padding:7px 14px; font-size:12px; font-weight:900; cursor:pointer; display:flex; align-items:center; gap:6px;">📋 COPIAR PARA SHEETS</button>
+        </div>
+        <textarea id="off-products-list" rows="12" placeholder="SKU [TAB] Qty [TAB] Pos"></textarea>
+      </div>
       <textarea id="off-order-meta" rows="12" placeholder="ID [TAB] Customer [TAB] Content"></textarea>
     </div>
 
@@ -7422,6 +7428,33 @@ window.exportMasterDB = exportMasterDB;
   };
 
   // Garante que os inline onclick encontram as funções mesmo quando o browser isola scripts locais.
+  window.copySkuQtyPos = function copySkuQtyPos() {
+    const ta = document.getElementById('off-products-list');
+    if (!ta || !ta.value.trim()) {
+      _offUiAlert('Products List está vazio. Importa primeiro as encomendas.');
+      return;
+    }
+    // Garante que o conteúdo está com tabs (formato Sheets-friendly)
+    const text = ta.value.trim();
+    navigator.clipboard.writeText(text).then(function() {
+      const btn = document.getElementById('off-copy-skuqtypos-btn');
+      if (btn) {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✅ COPIADO!';
+        btn.style.background = '#16a34a';
+        setTimeout(function() {
+          btn.innerHTML = orig;
+          btn.style.background = '#0ea5e9';
+        }, 2000);
+      }
+    }).catch(function() {
+      // fallback para browsers sem clipboard API
+      ta.select();
+      document.execCommand('copy');
+      _offUiAlert('Copiado! (fallback)');
+    });
+  };
+
   window.openImportOrdersModal = async function(){
     const modal = document.getElementById('import-orders-modal');
     if (modal) modal.style.display = 'flex';
