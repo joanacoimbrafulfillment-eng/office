@@ -3711,6 +3711,7 @@ Missing: ${sample}${more}`);
                 <div class="progress-container"><div class="progress-bar" style="width:${percent}%"></div></div>
                 <div class="batch-action-row">
                     <button class="btn-small btn-accent-fill" onclick="openEditModal('${_escapeHtml(batch.id)}', false)">EDIT</button>
+                    <button class="btn-small" style="background:var(--picking);" onclick="printPickingFromBatchCard('${_escapeHtml(batch.id)}')">🖨️ PICKING</button>
                     <button class="btn-small btn-delete" onclick="deleteBatch('${_escapeHtml(batch.id)}')">DEL</button>
                 </div>
             </div>`;
@@ -5603,6 +5604,77 @@ function closeModal(id) {
         }
         else uiAlert('O browser bloqueou o popup. Permite popups para este site.');
     }
+
+    // ── IMPRIMIR PICKING A PARTIR DO CARTÃO DO LOTE (OVERVIEW) ─────────────────
+    async function printPickingFromBatchCard(batchId) {
+        if (!batchId) return;
+        try {
+            // Use cache first, fallback to Firebase read
+            let batch = (_activeBatchesCache && _activeBatchesCache[batchId]) ? _activeBatchesCache[batchId] : null;
+            if (!batch) {
+                const snap = await db.ref('active_batches/' + batchId).once('value');
+                batch = snap.val();
+            }
+            if (!batch) return uiAlert('Lote não encontrado.');
+
+            const inv = batch.inventory || {};
+            const n   = String(batch.name || batchId).trim();
+            const c   = String(batch.carrier || '').trim();
+            const tD  = String(batch.dateClean || _nowDateClean()).trim();
+
+            const rows = [];
+            Object.keys(inv).forEach(function(prod) {
+                const it = inv[prod] || {};
+                const qty = Number(it.q || it.qty || it.quantity || 0);
+                const pos = String(it.pos || it.position || it.posicao || '??').trim();
+                if (prod && qty > 0) {
+                    rows.push({ sku: prod.toUpperCase(), qty: qty, pos: pos });
+                }
+            });
+
+            if (!rows.length) return uiAlert('Este lote não tem produtos no inventário.');
+
+            rows.sort(function(a, b) {
+                return a.pos.localeCompare(b.pos, undefined, { numeric: true, sensitivity: 'base' });
+            });
+
+            const now = new Date();
+            const dtStr = tD + '   ' + now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+
+            const rowsHtml = rows.map(function(r) {
+                return '<tr><td>' + r.sku + '</td><td style="text-align:center;">' + r.qty + '</td><td style="text-align:center;">' + r.pos + '</td></tr>';
+            }).join('');
+
+            const html = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+                + '<title>PICKING - ' + c + ' ' + n + '</title>'
+                + '<style>'
+                + 'body { font-family: Calibri, Arial, sans-serif; margin: 20px; font-size: 13px; }'
+                + 'h1 { font-size: 16px; font-weight: bold; text-align: center; margin: 4px 0 12px; }'
+                + '.dt { font-size: 12px; text-align: right; color: #555; margin-bottom: 4px; }'
+                + 'table { width: 100%; border-collapse: collapse; }'
+                + 'th { background: #f1f3f5; border: 1px solid #bbb; padding: 6px 10px; font-weight: bold; font-size: 13px; }'
+                + 'td { border: 1px solid #ccc; padding: 5px 10px; }'
+                + 'tr:nth-child(even) td { background: #f9f9f9; }'
+                + '@media print { body { margin: 10mm; } }'
+                + '</style></head><body>'
+                + '<div class="dt">' + dtStr + '</div>'
+                + '<h1>PICKING - ' + c + ' ' + n.toUpperCase() + '</h1>'
+                + '<table>'
+                + '<thead><tr><th>PRODUTO</th><th style="text-align:center;">Q</th><th style="text-align:center;">POSIÇÃO</th></tr></thead>'
+                + '<tbody>' + rowsHtml + '</tbody>'
+                + '</table>'
+                + '<script>window.onload=function(){window.print();}<\/script>'
+                + '</body></html>';
+
+            const w = window.open('about:blank', '_blank', 'width=700,height=700');
+            if (w) { w.document.write(html); w.document.close(); }
+            else uiAlert('O browser bloqueou o popup. Permite popups para este site.');
+        } catch(e) {
+            console.error('printPickingFromBatchCard error', e);
+            uiAlert('Erro ao imprimir picking: ' + (e && e.message ? e.message : e));
+        }
+    }
+    window.printPickingFromBatchCard = printPickingFromBatchCard;
 
 function handlePrePack(v) { const key = safeKey(v); const prodName = masterProductsDB[key] || "UNKNOWN SKU"; db.ref('pre_packing').push({ product: prodName, user: currentUser.email.split('@')[0].toUpperCase(), time: _nowTime(), dateClean: _nowDateClean() }).then(() => { resetScan(); loadPrePackHistory(); }); }
     let __offReturnRef = null, __offReturnCb = null;
