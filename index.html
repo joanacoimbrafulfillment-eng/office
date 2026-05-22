@@ -3696,9 +3696,19 @@ Missing: ${sample}${more}`);
         if (filterMode === 'PACKED_TODAY') leftInfo = `Packed: ${done}`;
         if (filterMode === 'READY_TO_PICK') leftInfo = `To Pick: ${total}`;
 
-        const pickedMeta = batch.pickedBy
-            ? `<div class="batch-picked-meta"><b>Picked by:</b> ${_escapeHtml(batch.pickedBy)}${batch.pickedAt ? ` <span class="batch-picked-at">@ ${_escapeHtml(batch.pickedAt)}</span>` : ''}</div>`
+        // Badge 🟡 picking em curso (vem do pickingSession em tempo real via Firebase)
+        const sess = batch.pickingSession;
+        const pickingBadge = (sess && sess.user)
+            ? `<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:6px 10px;margin-bottom:6px;font-size:13px;font-weight:700;color:#856404;">🟡 A recolher: ${_escapeHtml(sess.user)}${sess.startedAt ? ` desde ${_escapeHtml(sess.startedAt)}` : ''}</div>`
             : '';
+
+        // pickedBy — usa valor directo se existir; caso contrário deixa placeholder que será preenchido async
+        const batchId = batch.id;
+        const st = String(batch.status || '').toUpperCase();
+        const needsAsyncPick = !batch.pickedBy && (st === 'READY_TO_PACK' || st === 'COMPLETED');
+        const pickedMeta = batch.pickedBy
+            ? `<div class="batch-picked-meta" id="picked-meta-${_escapeHtml(batchId)}"><b>Picked by:</b> ${_escapeHtml(batch.pickedBy)}${batch.pickedAt ? ` <span class="batch-picked-at">@ ${_escapeHtml(batch.pickedAt)}</span>` : ''}</div>`
+            : (needsAsyncPick ? `<div class="batch-picked-meta" id="picked-meta-${_escapeHtml(batchId)}" style="color:#aaa;font-size:12px;">A carregar picker…</div>` : '');
 
         return `
             <div class="batch-card">
@@ -3707,12 +3717,13 @@ Missing: ${sample}${more}`);
                     <span>${_escapeHtml(leftInfo)}</span>
                     <span>Status: ${_escapeHtml(batch.status || 'N/A')}</span>
                 </div>
+                ${pickingBadge}
                 ${pickedMeta}
                 <div class="progress-container"><div class="progress-bar" style="width:${percent}%"></div></div>
                 <div class="batch-action-row">
-                    <button class="btn-small btn-accent-fill" onclick="openEditModal('${_escapeHtml(batch.id)}', false)">EDIT</button>
-                    <button class="btn-small" style="background:var(--picking);" onclick="printPickingFromBatchCard('${_escapeHtml(batch.id)}')">🖨️ PICKING</button>
-                    <button class="btn-small btn-delete" onclick="deleteBatch('${_escapeHtml(batch.id)}')">DEL</button>
+                    <button class="btn-small btn-accent-fill" onclick="openEditModal('${_escapeHtml(batchId)}', false)">EDIT</button>
+                    <button class="btn-small" style="background:var(--picking);" onclick="printPickingFromBatchCard('${_escapeHtml(batchId)}')">🖨️ PICKING</button>
+                    <button class="btn-small btn-delete" onclick="deleteBatch('${_escapeHtml(batchId)}')">DEL</button>
                 </div>
             </div>`;
     }
@@ -3779,6 +3790,27 @@ Missing: ${sample}${more}`);
 
             column.innerHTML = renderCarrierHeaderHTML(carrierName, carrierAgg[carrierName], color) + batchCards;
             container.appendChild(column);
+        });
+
+        // Async: preencher "Picked by" nos lotes que não o têm mas já foram picked
+        Object.keys(all || {}).forEach(function(batchId) {
+            const batch = all[batchId];
+            if (!batch || batch.pickedBy) return;
+            const st = String(batch.status || '').toUpperCase();
+            if (st !== 'READY_TO_PACK' && st !== 'COMPLETED') return;
+            const el = document.getElementById('picked-meta-' + batchId);
+            if (!el) return;
+            getPickingInfo(batchId).then(function(info) {
+                const el2 = document.getElementById('picked-meta-' + batchId);
+                if (!el2) return;
+                if (info && info.pickedBy) {
+                    el2.innerHTML = '<b>Picked by:</b> ' + _escapeHtml(info.pickedBy) + (info.pickedAt ? ' <span class="batch-picked-at">@ ' + _escapeHtml(info.pickedAt) + '</span>' : '');
+                    el2.style.color = '';
+                    el2.style.fontSize = '';
+                } else {
+                    el2.style.display = 'none';
+                }
+            });
         });
     }
 
