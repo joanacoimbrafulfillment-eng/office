@@ -1574,6 +1574,12 @@ document.addEventListener('click', (e) => {
         const end = document.getElementById('rep-end-date').value;
         const dataToExport = [];
 
+        // ── Validação de datas (evita erro 400 do Firebase com startAt/endAt vazios) ──
+        const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+        if (!start || !dateRe.test(start)) return uiAlert('Por favor preenche a Start Date no formato YYYY-MM-DD.');
+        if (!end   || !dateRe.test(end))   return uiAlert('Por favor preenche a End Date no formato YYYY-MM-DD.');
+        if (start > end) return uiAlert('A Start Date não pode ser posterior à End Date.');
+
         // Helper: check YYYY-MM-DD in range (inclusive)
         const inRange = (d) => (d && d >= start && d <= end);
 
@@ -1582,11 +1588,18 @@ document.addEventListener('click', (e) => {
         const carrierAllowed = (c) => _repCarrierAllowed(c, selectedCarriers);
 
         if (type === 'ACTIVITY') {
-            const [snap, activeBatchSnap, deletedBatchSnap] = await Promise.all([
-                db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
-                db.ref('active_batches').once('value'),
-                db.ref('deleted_batches').once('value')
-            ]);
+            let snap, activeBatchSnap, deletedBatchSnap;
+            try {
+                [snap, activeBatchSnap, deletedBatchSnap] = await Promise.all([
+                    db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
+                    db.ref('active_batches').once('value'),
+                    db.ref('deleted_batches').once('value')
+                ]);
+            } catch(e) {
+                console.error('Export ACTIVITY error:', e);
+                return uiAlert('Erro ao carregar dados do Firebase (ACTIVITY).\n' +
+                    'Confirma que o índice "dateClean" está definido nas regras de segurança em registos.\n\nDetalhe: ' + (e && e.message ? e.message : e));
+            }
             // Merge: active takes priority over archived for same key
             const batches = Object.assign({}, deletedBatchSnap.val() || {}, activeBatchSnap.val() || {});
 
@@ -1617,11 +1630,18 @@ document.addEventListener('click', (e) => {
 
         } else if (type === 'CARRIERS') {
             // CARRIERS: export IDs in date range — OPTIMIZED v11: filtrar por data em vez de descarregar tudo.
-            const [activeBSnap, deletedBSnap, regSnap] = await Promise.all([
-                db.ref('active_batches').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
-                db.ref('deleted_batches').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
-                db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value')
-            ]);
+            let activeBSnap, deletedBSnap, regSnap;
+            try {
+                [activeBSnap, deletedBSnap, regSnap] = await Promise.all([
+                    db.ref('active_batches').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
+                    db.ref('deleted_batches').orderByChild('dateClean').startAt(start).endAt(end).once('value'),
+                    db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value')
+                ]);
+            } catch(e) {
+                console.error('Export CARRIERS error:', e);
+                return uiAlert('Erro ao carregar dados do Firebase (CARRIERS).\n' +
+                    'Confirma que o índice "dateClean" está definido nas regras de segurança.\n\nDetalhe: ' + (e && e.message ? e.message : e));
+            }
             // Merge: active takes priority over archived for same key
             const batches = Object.assign({}, deletedBSnap.val() || {}, activeBSnap.val() || {});
             const registos = regSnap.val() || {};
@@ -1694,7 +1714,14 @@ document.addEventListener('click', (e) => {
 
         } else if (type === 'RETURNS_PRODUCTS' || type === 'REFUNDS_PRODUCTS') {
             // 1 row per product per day — Qty is the count for that specific day
-            const snap = await db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value');
+            let snap;
+            try {
+                snap = await db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value');
+            } catch(e) {
+                console.error('Export ' + type + ' error:', e);
+                return uiAlert('Erro ao carregar dados do Firebase (' + type + ').\n' +
+                    'Confirma que o índice "dateClean" está definido nas regras de segurança em registos.\n\nDetalhe: ' + (e && e.message ? e.message : e));
+            }
             // dayProdMap: { 'YYYY-MM-DD': { product: qty } }
             const dayProdMap = {};
             Object.values(snap.val() || {}).forEach(r => {
@@ -1728,10 +1755,15 @@ document.addEventListener('click', (e) => {
         }
 
         if (dataToExport.length === 0) return uiAlert("No data found for these dates" + (selectedCarriers.size > 0 ? " and selected carriers." : "."));
-        const ws = XLSX.utils.json_to_sheet(dataToExport);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Report");
-        XLSX.writeFile(wb, `WH_Export_${type}${carrierSuffix}_${start}_to_${end}.xlsx`);
+        try {
+            const ws = XLSX.utils.json_to_sheet(dataToExport);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Report");
+            XLSX.writeFile(wb, `WH_Export_${type}${carrierSuffix}_${start}_to_${end}.xlsx`);
+        } catch(e) {
+            console.error('XLSX write error:', e);
+            uiAlert('Erro ao gerar ficheiro Excel: ' + (e && e.message ? e.message : e));
+        }
     }
 
     // =========================
