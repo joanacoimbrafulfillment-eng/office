@@ -433,6 +433,18 @@
     </div>
 </div>
 
+<!-- MODAL: EM PICKING AGORA -->
+<div id="in-picking-modal" class="modal">
+    <div class="modal-content" style="max-width:860px;">
+        <div class="flex-between">
+            <h2 style="font-size:26px; margin:0;">🟡 Lotes Em Picking Agora</h2>
+            <button class="btn-small btn-delete" style="padding:12px 20px;" onclick="closeModal('in-picking-modal')">FECHAR</button>
+        </div>
+        <div id="in-picking-date" style="margin:8px 0 18px; font-size:13px; color:#666; font-weight:700;"></div>
+        <div id="in-picking-body"></div>
+    </div>
+</div>
+
 <!-- MODAL: PRE-PACKED TODAY -->
 <div id="prepack-today-modal" class="modal">
     <div class="modal-content" style="max-width:700px;">
@@ -555,6 +567,7 @@
                 <div class="dash-card overview-click-card" id="dash-card-ready-pick" onclick="setOverviewFilter('READY_TO_PICK')" title="Ver lotes Ready To Pick"> <h2 id="card-ready-pick">0</h2> <p>Ready To Pick</p> </div>
                 <div class="dash-card overview-click-card" id="dash-card-prepack" onclick="openPrepackTodayModal()" title="Ver produtos pré-embalados hoje"> <h2 id="card-prepack">0</h2> <p>Pre-Packed Today</p> </div>
                 <div class="dash-card overview-click-card" id="dash-card-cancelled" onclick="openCancelledIdsModal()" title="Ver IDs cancelados no dia" style="border-bottom-color:#e74c3c;"> <h2 id="card-cancelled" style="color:#e74c3c;">0</h2> <p>Cancelled IDs</p> </div>
+                <div class="dash-card overview-click-card" id="dash-card-in-picking" onclick="openInPickingModal()" title="Ver lotes em recolha agora" style="border-bottom-color:#8e44ad;"> <h2 id="card-in-picking" style="color:#8e44ad;">0</h2> <p>🟡 Em Picking</p> </div>
             </div>
             <div id="overview-filter-bar" class="card" style="display:none; padding:16px 20px; margin-top:-10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -4143,6 +4156,58 @@ async function openCancelledIdsModal() {
 }
 window.openCancelledIdsModal = openCancelledIdsModal;
 
+function openInPickingModal() {
+    const modal = document.getElementById('in-picking-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    const fD = (document.getElementById('global-date-filter') || {}).value || _todayDateClean();
+    const dateEl = document.getElementById('in-picking-date');
+    if (dateEl) dateEl.innerText = 'Data: ' + fD;
+
+    const body = document.getElementById('in-picking-body');
+    if (!body) return;
+    body.innerHTML = '<div style="padding:20px; color:#666;">A carregar...</div>';
+
+    const all = _activeBatchesCache || {};
+    const rows = [];
+
+    Object.keys(all).forEach(function(bId) {
+        const b = all[bId];
+        if (!b || b.dateClean !== fD) return;
+        if (!b.pickingSession || !b.pickingSession.user) return;
+        rows.push({ bId, b });
+    });
+
+    if (!rows.length) {
+        body.innerHTML = '<div style="padding:30px; text-align:center; color:#888; font-size:18px; font-weight:700;">Nenhum lote em picking agora.</div>';
+        return;
+    }
+
+    let html = '<div style="display:flex; flex-direction:column; gap:14px;">';
+    rows.forEach(function({ bId, b }) {
+        const sess = b.pickingSession;
+        const stats = _getBatchProgressInfo(b);
+        const safeBid = _escapeHtml(bId);
+        html += `<div style="background:#fffbeb; border:1.5px solid #ffc107; border-radius:14px; padding:18px 22px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+            <div style="font-size:36px;">🟡</div>
+            <div style="flex:1; min-width:180px;">
+                <div style="font-size:18px; font-weight:900; color:#1e293b;">${_escapeHtml(b.name || bId)}</div>
+                <div style="font-size:13px; color:#666; margin-top:3px;">${_escapeHtml(b.carrier || 'N/A')} &nbsp;|&nbsp; ${stats.total} IDs</div>
+            </div>
+            <div style="text-align:center; min-width:130px;">
+                <div style="font-size:13px; color:#856404; font-weight:700;">OPERADOR</div>
+                <div style="font-size:22px; font-weight:900; color:#92400e;">${_escapeHtml(sess.user)}</div>
+                ${sess.startedAt ? `<div style="font-size:12px; color:#999; margin-top:2px;">desde ${_escapeHtml(sess.startedAt)}</div>` : ''}
+            </div>
+            <button class="btn-small" style="background:var(--picking); padding:12px 18px; font-size:13px;" onclick="closeModal('in-picking-modal'); openEditModal('${safeBid}', false)">VER LOTE</button>
+        </div>`;
+    });
+    html += '</div>';
+    body.innerHTML = html;
+}
+window.openInPickingModal = openInPickingModal;
+
 
 // ================================
 // 🔎 OVERVIEW: QUICK ID SEARCH
@@ -4749,7 +4814,7 @@ function closeModal(id) {
 }
     function updateDashboardStats(all, fD) { 
         const isToday = (fD === _todayDateClean());
-        let nP = 0, nR = 0, nK = 0, nReadyPick = 0, nCancelled = 0;
+        let nP = 0, nR = 0, nK = 0, nReadyPick = 0, nCancelled = 0, nInPicking = 0;
 
         // Para dias anteriores, processed_ids pode estar ausente nos lotes arquivados.
         // Contamos IDs únicos picados a partir de um índice construído dos lotes do dia.
@@ -4767,6 +4832,7 @@ function closeModal(id) {
                 nK += stats.done;
                 if(String(b.status || '').toUpperCase() === 'READY_TO_PACK') nR += stats.pending;
                 if(String(b.status || '').toUpperCase() === 'PENDING_PICK') nReadyPick += 1;
+                if(b.pickingSession && b.pickingSession.user) nInPicking += 1;
             } else {
                 // Dias anteriores: lotes já estão COMPLETED no arquivo.
                 // "Packed" = IDs que tinham processed_ids (arquivados com o lote) 
@@ -4794,6 +4860,8 @@ function closeModal(id) {
         if(readyPickEl) readyPickEl.innerText = nReadyPick;
         const cancelledEl = document.getElementById('card-cancelled');
         if(cancelledEl) cancelledEl.innerText = nCancelled;
+        const inPickingEl = document.getElementById('card-in-picking');
+        if(inPickingEl) inPickingEl.innerText = nInPicking;
         _updateOverviewFilterUI();
     }
     function updateSelects(bts, fD) {
