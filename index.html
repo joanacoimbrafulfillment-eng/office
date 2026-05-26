@@ -674,6 +674,54 @@
                 </div>
                 <div class="scroll-area"><table id="perf-table"><thead><tr><th>Operator</th><th>Packed</th><th>Returns</th><th>Pre-Packs</th><th>Total</th></tr></thead><tbody></tbody></table></div>
             </div>
+
+            <!-- BATCH PICKING PERFORMANCE -->
+            <div class="card" style="margin-top:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+                    <div>
+                        <h3 style="margin:0;">⏱️ Performance de Recolha de Lotes</h3>
+                        <div style="font-size:13px; color:#666; margin-top:4px;">Tempo de recolha, produtos por lote e quantidades por produto.</div>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                        <input type="date" id="batch-perf-date" style="padding:10px; border-radius:10px; border:1px solid #ddd; font-size:14px;">
+                        <button id="btn-batch-perf-load" style="background:var(--picking); color:white; border:none; padding:12px 20px; border-radius:10px; font-weight:900; cursor:pointer; font-size:14px;">📊 CARREGAR</button>
+                        <button id="btn-batch-perf-export" style="background:#0ea5e9; color:white; border:none; padding:12px 20px; border-radius:10px; font-weight:900; cursor:pointer; font-size:14px;">⬇️ EXCEL</button>
+                    </div>
+                </div>
+
+                <!-- KPI Row -->
+                <div id="batch-perf-kpis" style="display:none; gap:14px; flex-wrap:wrap; margin-bottom:20px;">
+                    <div style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:16px 22px; flex:1; min-width:140px; text-align:center;">
+                        <div id="bpkpi-lotes" style="font-size:36px; font-weight:900; color:var(--picking);">—</div>
+                        <div style="font-size:12px; font-weight:900; text-transform:uppercase; color:#666; margin-top:4px;">Lotes</div>
+                    </div>
+                    <div style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:16px 22px; flex:1; min-width:140px; text-align:center;">
+                        <div id="bpkpi-tempo-med" style="font-size:36px; font-weight:900; color:#f59e0b;">—</div>
+                        <div style="font-size:12px; font-weight:900; text-transform:uppercase; color:#666; margin-top:4px;">Tempo Médio</div>
+                    </div>
+                    <div style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:16px 22px; flex:1; min-width:140px; text-align:center;">
+                        <div id="bpkpi-tempo-min" style="font-size:36px; font-weight:900; color:#28a745;">—</div>
+                        <div style="font-size:12px; font-weight:900; text-transform:uppercase; color:#666; margin-top:4px;">Mais Rápido</div>
+                    </div>
+                    <div style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:16px 22px; flex:1; min-width:140px; text-align:center;">
+                        <div id="bpkpi-tempo-max" style="font-size:36px; font-weight:900; color:#e74c3c;">—</div>
+                        <div style="font-size:12px; font-weight:900; text-transform:uppercase; color:#666; margin-top:4px;">Mais Lento</div>
+                    </div>
+                    <div style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:16px 22px; flex:1; min-width:140px; text-align:center;">
+                        <div id="bpkpi-total-prods" style="font-size:36px; font-weight:900; color:var(--primary);">—</div>
+                        <div style="font-size:12px; font-weight:900; text-transform:uppercase; color:#666; margin-top:4px;">Total Produtos</div>
+                    </div>
+                </div>
+
+                <!-- KPIs por Colaborador -->
+                <div id="batch-perf-colabs" style="display:none; margin-bottom:20px;">
+                    <div style="font-size:12px; font-weight:900; text-transform:uppercase; color:#666; margin-bottom:10px; letter-spacing:1px;">⏱️ Desempenho por Colaborador</div>
+                    <div id="batch-perf-colabs-cards" style="display:flex; gap:12px; flex-wrap:wrap;"></div>
+                </div>
+
+                <!-- Batch table -->
+                <div id="batch-perf-result" style="color:#888; font-style:italic; padding:10px 0;">Escolhe uma data e clica em CARREGAR.</div>
+            </div>
         </div>
 
         <!-- SECTION: REPORTS (EXCEL EXPORT) -->
@@ -1020,6 +1068,7 @@
     };
     firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth(), db = firebase.database();
+    window.db = db;
 
     const __uiState = { dialogResolver: null };
 
@@ -7577,6 +7626,327 @@ window.exportMasterDB = exportMasterDB;
       }
     });
   };
+})();
+
+// ============================================================
+// ⏱️  BATCH PICKING PERFORMANCE
+// ============================================================
+(function(){
+    'use strict';
+
+    // --- helpers ---
+    function _fmtDuration(ms) {
+        if (!ms || ms <= 0) return '—';
+        const totalSec = Math.round(ms / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        if (h > 0) return h + 'h ' + m + 'm';
+        if (m > 0) return m + 'm ' + s + 's';
+        return s + 's';
+    }
+
+    function _parseDateTime(str) {
+        if (!str) return null;
+        // "YYYY-MM-DD HH:mm:ss" or "YYYY-MM-DDTHH:mm:ss" or "DD/MM/YYYY, HH:mm:ss"
+        var s = String(str).trim();
+        var m;
+        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)) {
+            return new Date(s.replace(' ', 'T'));
+        }
+        m = s.match(/^(\d{2})\/(\d{2})\/(\d{4}),?\s*(\d{2}:\d{2}(?::\d{2})?)/);
+        if (m) return new Date(m[3]+'-'+m[2]+'-'+m[1]+'T'+m[4]);
+        return null;
+    }
+
+    function _escHtml(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function _colabStat(label, value, color) {
+        return '<div style="background:#fff; border-radius:8px; padding:8px 10px; text-align:center; border:1px solid #e5e7eb;">' +
+            '<div style="font-size:18px; font-weight:900; color:' + color + ';">' + value + '</div>' +
+            '<div style="font-size:10px; font-weight:900; text-transform:uppercase; color:#888; margin-top:2px;">' + label + '</div>' +
+        '</div>';
+    }
+
+    var _WARRANTY_SKIP = /^warranty\s+(pt|es)$/i;
+
+    // Count total products (sum of inventory qty values) and unique SKUs
+    // Excludes WARRANTY PT and WARRANTY ES from all counts
+    function _batchProductSummary(batch) {
+        var inv = batch.inventory || {};
+        var filteredInv = {};
+        Object.keys(inv).forEach(function(k) {
+            if (!_WARRANTY_SKIP.test(k.trim())) filteredInv[k] = inv[k];
+        });
+        var skus = Object.keys(filteredInv);
+        var totalQty = 0;
+        skus.forEach(function(k){ totalQty += Number((filteredInv[k] && filteredInv[k].q) || 0); });
+        return { skuCount: skus.length, totalQty: totalQty, inventory: filteredInv };
+    }
+
+    // Compute picking duration:
+    // prefer pickingSession.startedAt → pickedAt
+    // fallback: createdAt → pickedAt
+    function _batchPickingDuration(batch) {
+        var startStr = (batch.pickingSession && batch.pickingSession.startedAt) ? batch.pickingSession.startedAt : batch.createdAt;
+        var endStr = batch.pickedAt;
+        if (!endStr) return null;
+        var start = _parseDateTime(startStr);
+        var end   = _parseDateTime(endStr);
+        if (!start || !end || end <= start) return null;
+        return end - start; // milliseconds
+    }
+
+    // ---- main loader ----
+    async function loadBatchPerformance() {
+        var dateEl = document.getElementById('batch-perf-date');
+        var resultEl = document.getElementById('batch-perf-result');
+        var kpisEl = document.getElementById('batch-perf-kpis');
+        if (!dateEl || !resultEl) return;
+
+        var fD = dateEl.value;
+        if (!fD) { resultEl.innerHTML = '<span style="color:#e74c3c; font-weight:900;">Escolhe uma data primeiro.</span>'; return; }
+
+        resultEl.innerHTML = '<div style="color:#666; padding:10px;">⏳ A carregar lotes...</div>';
+        if (kpisEl) kpisEl.style.display = 'none';
+        var colabsEl = document.getElementById('batch-perf-colabs');
+        if (colabsEl) colabsEl.style.display = 'none';
+
+        try {
+            // Load active + archived batches for the date
+            var db = window.db;
+            if (!db) throw new Error('Firebase DB não disponível.');
+
+            var snaps = await Promise.all([
+                db.ref('active_batches').orderByChild('dateClean').equalTo(fD).once('value'),
+                db.ref('deleted_batches').orderByChild('dateClean').equalTo(fD).once('value')
+            ]);
+
+            var allBatches = {};
+            [snaps[0].val() || {}, snaps[1].val() || {}].forEach(function(obj){
+                Object.assign(allBatches, obj);
+            });
+
+            var batchKeys = Object.keys(allBatches);
+            if (!batchKeys.length) {
+                resultEl.innerHTML = '<div style="color:#888; padding:10px;">Sem lotes para ' + _escHtml(fD) + '.</div>';
+                return;
+            }
+
+            // Build rows
+            var rows = [];
+            batchKeys.forEach(function(bId){
+                var b = allBatches[bId];
+                if (!b || b.dateClean !== fD) return;
+                var dur = _batchPickingDuration(b);
+                var prodInfo = _batchProductSummary(b);
+                var requiredIds = [];
+                if (b.expected_ids) {
+                    if (Array.isArray(b.expected_ids)) requiredIds = b.expected_ids;
+                    else requiredIds = Object.values(b.expected_ids);
+                } else if (b.order_details) {
+                    requiredIds = Object.keys(b.order_details);
+                }
+                rows.push({
+                    id: bId,
+                    name: b.name || bId,
+                    carrier: b.carrier || 'N/A',
+                    status: b.status || 'N/A',
+                    pickedBy: b.pickedBy || '—',
+                    startStr: (b.pickingSession && b.pickingSession.startedAt) ? b.pickingSession.startedAt : (b.createdAt || '—'),
+                    endStr: b.pickedAt || '—',
+                    durMs: dur,
+                    orderCount: requiredIds.length,
+                    skuCount: prodInfo.skuCount,
+                    totalQty: prodInfo.totalQty,
+                    inventory: prodInfo.inventory
+                });
+            });
+
+            // Sort by picking end time (most recent first, then by name)
+            rows.sort(function(a,b){
+                var ta = a.endStr !== '—' ? (_parseDateTime(a.endStr) || 0) : 0;
+                var tb = b.endStr !== '—' ? (_parseDateTime(b.endStr) || 0) : 0;
+                if (ta && tb) return tb - ta;
+                return a.name.localeCompare(b.name);
+            });
+
+            // KPIs
+            var withDur = rows.filter(function(r){ return r.durMs > 0; });
+            var avgMs = withDur.length ? withDur.reduce(function(s,r){ return s+r.durMs; }, 0) / withDur.length : 0;
+            var minMs = withDur.length ? Math.min.apply(null, withDur.map(function(r){ return r.durMs; })) : 0;
+            var maxMs = withDur.length ? Math.max.apply(null, withDur.map(function(r){ return r.durMs; })) : 0;
+            var totalQtyAll = rows.reduce(function(s,r){ return s + r.totalQty; }, 0);
+
+            if (kpisEl) {
+                kpisEl.style.display = 'flex';
+                document.getElementById('bpkpi-lotes').textContent = rows.length;
+                document.getElementById('bpkpi-tempo-med').textContent = withDur.length ? _fmtDuration(avgMs) : '—';
+                document.getElementById('bpkpi-tempo-min').textContent = withDur.length ? _fmtDuration(minMs) : '—';
+                document.getElementById('bpkpi-tempo-max').textContent = withDur.length ? _fmtDuration(maxMs) : '—';
+                document.getElementById('bpkpi-total-prods').textContent = totalQtyAll;
+            }
+
+            // --- KPIs por colaborador (cards interativos) ---
+            (function renderColabKpis() {
+                var colabsEl = document.getElementById('batch-perf-colabs');
+                var cardsEl  = document.getElementById('batch-perf-colabs-cards');
+                if (!colabsEl || !cardsEl) return;
+
+                var byColab = {};
+                rows.forEach(function(r) {
+                    var name = (r.pickedBy && r.pickedBy !== '—') ? r.pickedBy : '(sem picker)';
+                    if (!byColab[name]) byColab[name] = [];
+                    byColab[name].push(r);
+                });
+
+                var colabs = Object.keys(byColab).sort();
+                if (!colabs.length) { colabsEl.style.display = 'none'; return; }
+
+                colabsEl.style.display = 'block';
+                cardsEl.innerHTML = '';
+
+                colabs.forEach(function(name, idx) {
+                    var cRows = byColab[name];
+                    var cWithDur = cRows.filter(function(r) { return r.durMs > 0; });
+                    var cAvgMs  = cWithDur.length ? cWithDur.reduce(function(s,r){ return s+r.durMs; },0) / cWithDur.length : 0;
+                    var cMinMs  = cWithDur.length ? Math.min.apply(null, cWithDur.map(function(r){ return r.durMs; })) : 0;
+                    var cMaxMs  = cWithDur.length ? Math.max.apply(null, cWithDur.map(function(r){ return r.durMs; })) : 0;
+                    var cTotalQty = cRows.reduce(function(s,r){ return s+r.totalQty; },0);
+
+                    var accentColor = '#8e44ad';
+                    if (cAvgMs > 0) accentColor = cAvgMs <= 1200000 ? '#28a745' : cAvgMs <= 2400000 ? '#f59e0b' : '#e74c3c';
+
+                    var panelId = 'bpcolab-panel-' + idx;
+
+                    // Build detail table rows
+                    var tRows = cRows.map(function(r) {
+                        var durCell = r.durMs > 0
+                            ? '<span style="font-weight:900;color:' + (r.durMs>3600000?'#e74c3c':r.durMs>1200000?'#f59e0b':'#28a745') + ';">' + _fmtDuration(r.durMs) + '</span>'
+                            : '<span style="color:#aaa;">—</span>';
+                        var statusBg = r.status==='COMPLETED'?'#d1fae5':r.status==='READY_TO_PACK'?'#dbeafe':r.status==='PENDING_PICK'?'#fef3c7':'#f3f4f6';
+                        var invKeys = Object.keys(r.inventory);
+                        var prodHtml = invKeys.length
+                            ? invKeys.map(function(k){
+                                var it = r.inventory[k]||{};
+                                var pos = it.pos ? ' <span style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:900;">' + _escHtml(it.pos) + '</span>' : '';
+                                return '<span style="display:inline-flex;align-items:center;gap:3px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:5px;padding:1px 6px;margin:1px;font-size:11px;"><b>' + Number(it.q||0) + 'x</b> ' + _escHtml(k) + pos + '</span>';
+                              }).join('')
+                            : '<span style="color:#aaa;font-size:11px;">sem inventário</span>';
+                        return '<tr style="vertical-align:top;">' +
+                            '<td><b>' + _escHtml(r.name) + '</b></td>' +
+                            '<td>' + _escHtml(r.carrier) + '</td>' +
+                            '<td><span style="font-size:11px;font-weight:900;padding:2px 7px;border-radius:5px;background:' + statusBg + ';">' + _escHtml(r.status) + '</span></td>' +
+                            '<td style="font-size:11px;color:#666;">' + _escHtml(r.startStr !== '—' ? (r.startStr.slice(11,19)||r.startStr) : '—') + '</td>' +
+                            '<td style="font-size:11px;color:#666;">' + _escHtml(r.endStr !== '—' ? (r.endStr.slice(11,19)||r.endStr) : '—') + '</td>' +
+                            '<td style="text-align:center;">' + durCell + '</td>' +
+                            '<td style="text-align:center;font-weight:900;">' + r.orderCount + '</td>' +
+                            '<td style="text-align:center;font-weight:900;color:var(--primary);">' + r.totalQty + '</td>' +
+                            '<td style="min-width:220px;">' + prodHtml + '</td>' +
+                        '</tr>';
+                    }).join('');
+
+                    var detailHtml =
+                        '<div id="' + panelId + '" style="display:none; margin-top:14px; border-top:1px solid #e5e7eb; padding-top:12px;">' +
+                            '<div style="overflow-x:auto; max-height:340px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:10px;">' +
+                                '<table style="font-size:12px; width:100%; border-collapse:collapse;">' +
+                                    '<thead><tr style="background:#f8fafc;">' +
+                                        '<th style="padding:8px;text-align:left;border-bottom:2px solid #dee2e6;">Lote</th>' +
+                                        '<th style="padding:8px;text-align:left;border-bottom:2px solid #dee2e6;">Carrier</th>' +
+                                        '<th style="padding:8px;text-align:left;border-bottom:2px solid #dee2e6;">Status</th>' +
+                                        '<th style="padding:8px;text-align:left;border-bottom:2px solid #dee2e6;">Início</th>' +
+                                        '<th style="padding:8px;text-align:left;border-bottom:2px solid #dee2e6;">Fim</th>' +
+                                        '<th style="padding:8px;text-align:center;border-bottom:2px solid #dee2e6;">⏱ Duração</th>' +
+                                        '<th style="padding:8px;text-align:center;border-bottom:2px solid #dee2e6;">Encomendas</th>' +
+                                        '<th style="padding:8px;text-align:center;border-bottom:2px solid #dee2e6;">Qtd</th>' +
+                                        '<th style="padding:8px;text-align:left;border-bottom:2px solid #dee2e6;">Produtos</th>' +
+                                    '</tr></thead>' +
+                                    '<tbody>' + tRows + '</tbody>' +
+                                '</table>' +
+                            '</div>' +
+                        '</div>';
+
+                    var wrapper = document.createElement('div');
+                    wrapper.style.cssText = 'flex:1; min-width:220px;';
+                    wrapper.innerHTML =
+                        '<div class="bpcolab-card" data-panel="' + panelId + '" style="background:#f8fafc;border:2px solid ' + accentColor + ';border-radius:14px;padding:16px 20px;cursor:pointer;user-select:none;transition:box-shadow .15s;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                                '<span style="font-size:15px;font-weight:900;color:#1e293b;">👤 ' + _escHtml(name) + '</span>' +
+                                '<span class="bpcolab-arrow" style="font-size:14px;color:#94a3b8;transition:transform .2s;">▼</span>' +
+                            '</div>' +
+                            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">' +
+                                _colabStat('Lotes',        cRows.length,                          accentColor) +
+                                _colabStat('Qtd Total',    cTotalQty,                             '#2c3e50') +
+                                _colabStat('Tempo Médio',  cAvgMs > 0 ? _fmtDuration(cAvgMs) : '—', '#f59e0b') +
+                                _colabStat('Mais Rápido',  cMinMs > 0 ? _fmtDuration(cMinMs) : '—', '#28a745') +
+                                _colabStat('Mais Lento',   cMaxMs > 0 ? _fmtDuration(cMaxMs) : '—', '#e74c3c') +
+                            '</div>' +
+                            detailHtml +
+                        '</div>';
+                    cardsEl.appendChild(wrapper);
+                });
+
+                // Toggle panels on card click
+                cardsEl.addEventListener('click', function(e) {
+                    var card = e.target.closest('.bpcolab-card');
+                    if (!card) return;
+                    var panelId = card.getAttribute('data-panel');
+                    var panel = document.getElementById(panelId);
+                    var arrow = card.querySelector('.bpcolab-arrow');
+                    if (!panel) return;
+                    var open = panel.style.display !== 'none';
+                    panel.style.display = open ? 'none' : 'block';
+                    if (arrow) arrow.style.transform = open ? '' : 'rotate(180deg)';
+                    card.style.boxShadow = open ? '' : '0 4px 16px rgba(0,0,0,0.10)';
+                });
+            })();
+
+            // Table removed - info now shown in interactive collaborator cards above
+            resultEl.innerHTML = '';
+
+            // Store rows for export
+            window._batchPerfRows = rows;
+
+        } catch(e) {
+            console.error('loadBatchPerformance error:', e);
+            resultEl.innerHTML = '<span style="color:#e74c3c; font-weight:900;">Erro: ' + _escHtml(e && e.message ? e.message : String(e)) + '</span>';
+        }
+    }
+
+    function exportBatchPerformance() {
+        var rows = window._batchPerfRows;
+        if (!rows || !rows.length) { alert('Nada para exportar. Carrega primeiro os dados.'); return; }
+        if (typeof XLSX === 'undefined') { alert('Biblioteca XLSX não disponível.'); return; }
+
+        var data = [['Lote','Carrier','Status','Picker','Início Recolha','Fim Recolha','Duração (min)','Nº Encomendas','SKUs','Qtd Total Produtos','Produtos (SKU x Qty)']];
+        rows.forEach(function(r){
+            var durMin = r.durMs > 0 ? Math.round(r.durMs / 60000) : '';
+            var prodList = Object.keys(r.inventory).map(function(k){ return k + ' x' + (r.inventory[k].q || 0); }).join(' | ');
+            data.push([r.name, r.carrier, r.status, r.pickedBy, r.startStr, r.endStr, durMin, r.orderCount, r.skuCount, r.totalQty, prodList]);
+        });
+
+        var ws = XLSX.utils.aoa_to_sheet(data);
+        var wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Picking Performance');
+        var dateEl = document.getElementById('batch-perf-date');
+        XLSX.writeFile(wb, 'batch_picking_performance_' + (dateEl ? dateEl.value : 'export') + '.xlsx');
+    }
+
+    // Wire up after DOM ready
+    document.addEventListener('DOMContentLoaded', function(){
+        var today = (function(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+        var dateEl = document.getElementById('batch-perf-date');
+        if (dateEl && !dateEl.value) dateEl.value = today;
+        var btnLoad = document.getElementById('btn-batch-perf-load');
+        if (btnLoad) btnLoad.addEventListener('click', loadBatchPerformance);
+        var btnExp = document.getElementById('btn-batch-perf-export');
+        if (btnExp) btnExp.addEventListener('click', exportBatchPerformance);
+    });
+
+    window.loadBatchPerformance = loadBatchPerformance;
+    window.exportBatchPerformance = exportBatchPerformance;
 })();
 </script>
 
