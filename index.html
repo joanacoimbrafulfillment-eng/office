@@ -3662,6 +3662,8 @@ Missing: ${sample}${more}`);
                 pickedTime: tm,
                 pickedAt: dt
             }),
+            // Limpar sessão de picking — lote passou para READY_TO_PACK
+            db.ref('active_batches/' + bId + '/pickingSession').remove(),
             // Local history (if permitted)
             db.ref(`active_batches/${bId}/history`).push({
                 dateClean: dc,
@@ -3797,8 +3799,12 @@ Missing: ${sample}${more}`);
         if (filterMode === 'READY_TO_PICK') leftInfo = `To Pick: ${total}`;
 
         // Badge 🟡 picking em curso (vem do pickingSession em tempo real via Firebase)
+        // Só mostrar se o lote ainda NÃO passou para READY_TO_PACK ou COMPLETED —
+        // se passou, o picking acabou mesmo que pickingSession não tenha sido limpo
         const sess = batch.pickingSession;
-        const pickingBadge = (sess && sess.user)
+        const batchSt = String(batch.status || '').toUpperCase();
+        const pickingStillOpen = batchSt !== 'READY_TO_PACK' && batchSt !== 'COMPLETED';
+        const pickingBadge = (sess && sess.user && pickingStillOpen)
             ? `<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:6px 10px;margin-bottom:6px;font-size:13px;font-weight:700;color:#856404;">🟡 A recolher: ${_escapeHtml(sess.user)}${sess.startedAt ? ` desde ${_escapeHtml(sess.startedAt)}` : ''}</div>`
             : '';
 
@@ -4257,6 +4263,10 @@ function openInPickingModal() {
         const b = all[bId];
         if (!b || b.dateClean !== fD) return;
         if (!b.pickingSession || !b.pickingSession.user) return;
+        // Não mostrar lotes que já passaram de picking (status garante consistência
+        // mesmo que pickingSession não tenha sido limpo por falha de rede)
+        const bSt = String(b.status || '').toUpperCase();
+        if (bSt === 'READY_TO_PACK' || bSt === 'COMPLETED') return;
         rows.push({ bId, b });
     });
 
@@ -4913,7 +4923,7 @@ function closeModal(id) {
                 nK += stats.done;
                 if(String(b.status || '').toUpperCase() === 'READY_TO_PACK') nR += stats.pending;
                 if(String(b.status || '').toUpperCase() === 'PENDING_PICK') nReadyPick += 1;
-                if(b.pickingSession && b.pickingSession.user) nInPicking += 1;
+                if(b.pickingSession && b.pickingSession.user && String(b.status || '').toUpperCase() !== 'READY_TO_PACK' && String(b.status || '').toUpperCase() !== 'COMPLETED') nInPicking += 1;
             } else {
                 // Dias anteriores: lotes já estão COMPLETED no arquivo.
                 // "Packed" = IDs que tinham processed_ids (arquivados com o lote) 
