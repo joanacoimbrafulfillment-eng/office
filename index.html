@@ -6035,6 +6035,11 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var totalReturnIds = returns.length;
     var totalRefundIds = refunds.length;
 
+    var totalReturnComplete   = returns.filter(function(r){ return (r.returnStatus || '').toUpperCase() !== 'INCOMPLETE'; }).length;
+    var totalReturnIncomplete = returns.filter(function(r){ return (r.returnStatus || '').toUpperCase() === 'INCOMPLETE'; }).length;
+    var totalRefundComplete   = refunds.filter(function(r){ return (r.returnStatus || '').toUpperCase() !== 'INCOMPLETE'; }).length;
+    var totalRefundIncomplete = refunds.filter(function(r){ return (r.returnStatus || '').toUpperCase() === 'INCOMPLETE'; }).length;
+
     var totalPackedProducts = packed.reduce(function(acc,r){ return acc + _countProducts(r.prods); }, 0);
     var totalReturnProducts = returns.reduce(function(acc,r){ return acc + _countProducts(r.prods); }, 0);
     var totalRefundProducts = refunds.reduce(function(acc,r){ return acc + _countProducts(r.prods); }, 0);
@@ -6090,8 +6095,8 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var html = '';
     html += '<div class="grid-2" style="margin-top:10px;">';
     html += '  <div class="card"><b>PACKING (dia)</b><div style="margin-top:8px;">IDs embalados: <b>'+totalPackedIds+'</b><br>Produtos embalados: <b>'+totalPackedProducts+'</b></div></div>';
-    html += '  <div class="card"><b>RETURNS (dia)</b><div style="margin-top:8px;">IDs returns: <b>'+totalReturnIds+'</b><br>Produtos returns: <b>'+totalReturnProducts+'</b></div></div>';
-    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b></div></div>';
+    html += '  <div class="card"><b>RETURNS (dia)</b><div style="margin-top:8px;">IDs returns: <b>'+totalReturnIds+'</b><br>Produtos returns: <b>'+totalReturnProducts+'</b><br><span style="color:#28a745;">&#x2705; Completos: <b>'+totalReturnComplete+'</b></span><br><span style="color:#f59e0b;">&#x26A0;&#xFE0F; Incompletos: <b>'+totalReturnIncomplete+'</b></span></div></div>';
+    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b><br><span style="color:#28a745;">&#x2705; Completos: <b>'+totalRefundComplete+'</b></span><br><span style="color:#f59e0b;">&#x26A0;&#xFE0F; Incompletos: <b>'+totalRefundIncomplete+'</b></span></div></div>';
     html += '</div>';
 
     html += '<div class="card" style="margin-top:10px;"><b>PRE-PACKING (dia)</b><div style="margin-top:8px;">Registos pre-packing: <b>'+totalPrepackIds+'</b><br>Produtos em pre-packing: <b>'+totalPrepackProducts+'</b></div></div>';
