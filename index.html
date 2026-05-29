@@ -810,7 +810,7 @@
                     </label>
                     <label style="display:flex; align-items:center; gap:6px;">
                         <input type="checkbox" id="cross-only-mismatch" />
-                        Só com diferenças (itens)
+                        Só com diferenças (itens) <span style="font-size:12px; color:#f59e0b; font-weight:700;">⚠️ INCOMPLETO</span>
                     </label>
                     <button class="btn-submit" onclick="runCrosscheck()">RUN</button>
                     <button class="btn-secondary" onclick="exportCrosscheck()">EXPORT XLSX</button>
@@ -829,6 +829,7 @@
                                 <th>Returned At</th>
                                 <th>Packed Items</th>
                                 <th>Returned Items</th>
+                                <th>Status Return</th>
                                 <th>Missing (Packed → Returns)</th>
                                 <th>Extra (Returns → Packed)</th>
                                 <th>Details</th>
@@ -1926,7 +1927,8 @@ document.addEventListener('click', (e) => {
                     DateTime: dt,
                     ts: ts,
                     prodsStr: r.prods || "",
-                    items: items
+                    items: items,
+                    returnStatus: r.returnStatus || ""
                 };
 
                 if(mode === "PACKING") perId[id].packed.push(entry);
@@ -1957,7 +1959,9 @@ document.addEventListener('click', (e) => {
                 const returnCounts = _countItems(returnItems);
                 const diff = _diffCounts(packedCounts, returnCounts);
 
-                const hasMismatch = (diff.missing.length || diff.extra.length);
+                // "Só com diferenças (itens)" = fechados como INCOMPLETO no WH
+                const isIncomplete = returned && returnedLatest.returnStatus === 'INCOMPLETE';
+                const hasMismatch = isIncomplete;
                 if(onlyMismatch && !hasMismatch) return;
 
                 if(returned) returnedIds += 1;
@@ -1971,6 +1975,8 @@ document.addEventListener('click', (e) => {
                     returnCount: returnItems.length,
                     missing: diff.missing,
                     extra: diff.extra,
+                    isIncomplete: isIncomplete,
+                    returnStatus: returnedLatest ? (returnedLatest.returnStatus || "COMPLETE") : "",
                     packed: packedLatest,
                     returned: returnedLatest
                 });
@@ -1984,8 +1990,8 @@ document.addEventListener('click', (e) => {
                 <div><b>Packed IDs</b>: ${packedIds}</div>
                 <div><b>Returned</b>: ${returnedIds}</div>
                 <div><b>Not returned</b>: ${Math.max(0, packedIds - returnedIds)}</div>
-                <div><b>Mismatches</b>: ${mismatchIds}</div>
-                <div style="color:#777;">(Filtro aplicado: ${onlyReturned ? "returned only" : "all packed"}, ${onlyMismatch ? "mismatch only" : "all"})</div>
+                <div style="color:#f59e0b; font-weight:700;">⚠️ Incompletos: ${mismatchIds}</div>
+                <div style="color:#777;">(Filtro aplicado: ${onlyReturned ? "returned only" : "all packed"}, ${onlyMismatch ? "incompletos only" : "all"})</div>
             `;
 
             // Render table
@@ -1994,6 +2000,9 @@ document.addEventListener('click', (e) => {
                 const extra = r.extra.length ? r.extra.join('<br>') : "-";
                 const packedList = r.packed.items.length ? r.packed.items.map(x=>`• ${_escapeHtml(x)}`).join('<br>') : "(none)";
                 const returnList = (r.returned && r.returned.items.length) ? r.returned.items.map(x=>`• ${_escapeHtml(x)}`).join('<br>') : "(none)";
+                const statusBadge = r.returnStatus === 'INCOMPLETE'
+                    ? `<span style="background:#f59e0b; color:white; font-size:11px; font-weight:900; padding:3px 8px; border-radius:6px;">⚠️ INCOMPLETO</span>`
+                    : (r.returnStatus ? `<span style="background:#28a745; color:white; font-size:11px; font-weight:900; padding:3px 8px; border-radius:6px;">✅ COMPLETO</span>` : `-`);
                 const det = `
                   <details>
                     <summary>View</summary>
@@ -2004,12 +2013,13 @@ document.addEventListener('click', (e) => {
                       <div style="font-size:12px; color:#555;">${returnList}</div>
                     </div>
                   </details>`;
-                return `<tr>
+                return `<tr${r.isIncomplete ? ' style="background:#fff8e7;"' : ''}>
                     <td>${_escapeHtml(r.id)}</td>
                     <td>${_escapeHtml(r.packedAt || "")}</td>
                     <td>${_escapeHtml(r.returnedAt || "")}</td>
                     <td style="text-align:center;">${r.packedCount}</td>
                     <td style="text-align:center;">${r.returnCount}</td>
+                    <td style="text-align:center;">${statusBadge}</td>
                     <td style="font-size:12px;">${miss}</td>
                     <td style="font-size:12px;">${extra}</td>
                     <td>${det}</td>
@@ -2033,6 +2043,7 @@ document.addEventListener('click', (e) => {
             Returned_At: r.returnedAt,
             Packed_Items: r.packedCount,
             Returned_Items: r.returnCount,
+            Return_Status: r.returnStatus || "",
             Missing: r.missing.join(" | "),
             Extra: r.extra.join(" | "),
             Packed_Batch: (r.packed && r.packed.batch) ? r.packed.batch : "",
