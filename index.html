@@ -2059,6 +2059,118 @@ document.addEventListener('click', (e) => {
         const e = document.getElementById('cross-end').value || "ALL";
         XLSX.writeFile(wb, `WH_Crosscheck_PACKED_vs_RETURNS_${s}_to_${e}.xlsx`);
     }
+
+
+    // ============================================================
+    // GOOGLE SHEETS AUTO SYNC (Option 1)
+    // - OFFICE / Create Batch -> PICKING sheet as SALES
+    // - RETURNS scanner -> RETURNS_REFUNDS sheet as return, product/qty only
+    // - REFUNDS scanner -> RETURNS_REFUNDS sheet as refund, product/qty only
+    // Configure once with the deployed Apps Script Web App URL.
+    // Keep the same Web App every month; only update ACTIVE_SPREADSHEET_ID
+    // in Apps Script properties when you copy the monthly inventory sheet.
+    // ============================================================
+    window.WH_SHEETS_WEB_APP_URL = window.WH_SHEETS_WEB_APP_URL || 'https://script.google.com/macros/s/AKfycbzr8b1fDe28HCRXjQHJK8QekR3b1uMp2FXsJS09cGtw4nd53wpQJZeC3KoRgdGjKXJG/exec';
+    window.WH_SHEETS_SECRET = window.WH_SHEETS_SECRET || '';
+
+    function whSheetsConfigured() {
+        return !!String(window.WH_SHEETS_WEB_APP_URL || '').trim();
+    }
+
+    function whSheetsParseSkuQtyPos(text) {
+        return String(text || '')
+            .split('\n')
+            .map(function(line){
+                const p = line.split('\t');
+                if(p.length < 2 || !String(p[0] || '').trim()) return null;
+                const qty = parseInt(String(p[1] || '').replace(',', '.'), 10) || 0;
+                if(!qty) return null;
+                return {
+                    product: String(p[0] || '').trim().toUpperCase(),
+                    qty: qty,
+                    pos: String(p[2] || '').trim()
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function whSheetsAggregateProducts(list) {
+        const map = {};
+        (list || []).forEach(function(name){
+            const product = String(name || '').trim().toUpperCase();
+            if(!product || product === 'NO ITEMS') return;
+            map[product] = (map[product] || 0) + 1;
+        });
+        return Object.keys(map).sort().map(function(product){
+            return { product: product, qty: map[product] };
+        });
+    }
+
+    async function whSheetsPost(payload) {
+        const url = String(window.WH_SHEETS_WEB_APP_URL || '').trim();
+        if(!url) {
+            console.warn('WH Sheets sync disabled: WH_SHEETS_WEB_APP_URL is empty.', payload);
+            return { ok:false, disabled:true };
+        }
+
+        payload = payload || {};
+        payload.secret = String(window.WH_SHEETS_SECRET || '');
+        payload.sent_at = new Date().toISOString();
+
+        // Apps Script does not return CORS headers reliably. no-cors sends the POST
+        // without blocking the warehouse page; the sheet keeps its own import log.
+        await fetch(url, {
+            method: 'POST',
+            mode: 'no-cors',
+            cache: 'no-store',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+        return { ok:true };
+    }
+
+    async function whSheetsSendPickingBatch(info) {
+        try {
+            info = info || {};
+            const rows = whSheetsParseSkuQtyPos(info.productsText || '');
+            if(!rows.length) return;
+            await whSheetsPost({
+                type: 'picking',
+                source_key: 'picking:' + (info.batchKey || [info.date, info.carrier, info.batchName].join('|')),
+                date: info.date || _nowDateClean(),
+                batch: info.batchName || '',
+                carrier: info.carrier || '',
+                user: info.user || '',
+                observations: 'Auto sync from WH OFFICE',
+                rows: rows
+            });
+        } catch(e) {
+            console.error('Erro ao enviar PICKING para Google Sheets:', e);
+            uiAlert('Lote criado, mas falhou o envio automático para Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
+        }
+    }
+
+    async function whSheetsSendReturnRefund(info) {
+        try {
+            info = info || {};
+            const mode = String(info.mode || '').toUpperCase();
+            const type = _isRefundMode(mode) ? 'refund' : (_isReturnMode(mode) ? 'return' : '');
+            if(!type) return;
+            const rows = whSheetsAggregateProducts(info.products || []);
+            if(!rows.length) return;
+            await whSheetsPost({
+                type: type,
+                // Dedupe key only; do not send order ID/tracking to RETURNS_REFUNDS.
+                source_key: type + ':' + (info.registoKey || String(info.endTs || Date.now())),
+                date: info.date || _nowDateClean(),
+                rows: rows
+            });
+        } catch(e) {
+            console.error('Erro ao enviar RETURN/REFUND para Google Sheets:', e);
+            uiAlert('Registo guardado, mas falhou o envio automático para Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
+        }
+    }
+
 function handleScan(v, mode) {
         const m = mode || currentMode;
         const key = safeKey(v);
@@ -2102,7 +2214,7 @@ function handleScan(v, mode) {
                 logBatchAction(bId, `PACKED ID: ${scanData.id}`);
             }
             const dc = _nowDateClean();
-            await db.ref('registos').push({ 
+            const whRegistoPayload = { 
                 id: scanData.id, 
                 track: scanData.track, 
                 prods: scanData.prods.join(' | ') || "No Items", 
@@ -2115,7 +2227,9 @@ function handleScan(v, mode) {
                 endTs: endTs,
                 time: endTime, // Main sorting time
                 dateClean: dc
-            });
+            };
+            const whRegistoRef = db.ref('registos').push();
+            await whRegistoRef.set(whRegistoPayload);
 
             // Write to persistent ID history so SEARCH can show all events even across batch recreations
             const uname = (currentUser && currentUser.email) ? currentUser.email.split('@')[0].toUpperCase() : "UNKNOWN";
@@ -2136,6 +2250,16 @@ function handleScan(v, mode) {
                     ? ("Start: " + (scanData.startTime || endTime) + " | Confirm: " + endTime)
                     : (_isRefundMode(m) ? "Refund saved" : "Return saved")
             });
+
+            if(_isReturnMode(m) || _isRefundMode(m)) {
+                await whSheetsSendReturnRefund({
+                    mode: m,
+                    registoKey: (typeof whRegistoRef !== 'undefined' && whRegistoRef && whRegistoRef.key) ? whRegistoRef.key : '',
+                    products: scanData.prods.slice(),
+                    date: dc,
+                    endTs: endTs
+                });
+            }
 
             resetScan();
         } catch (e) {
@@ -5681,6 +5805,15 @@ function closeModal(id) {
                 Details: "Added to batch | Customer: " + (od.name || "")
             });
         }));
+
+        await whSheetsSendPickingBatch({
+            batchKey: key,
+            batchName: n,
+            carrier: c,
+            date: tD,
+            user: createdBy,
+            productsText: document.getElementById('off-products-list').value
+        });
 
         uiAlert("Created!");
         document.getElementById('off-batch-name').value="";
