@@ -2205,24 +2205,67 @@ document.addEventListener('click', (e) => {
         }
     }
 
+    function whSheetsRowsFromProductsText(text) {
+        const items = String(text || '')
+            .split('|')
+            .map(function(x){ return x.trim(); })
+            .filter(Boolean);
+        return whSheetsAggregateProducts(items);
+    }
+
+    const __whSheetsReturnRefundSyncedKeys = new Set();
+
     async function whSheetsSendReturnRefund(info) {
         try {
             info = info || {};
             const mode = String(info.mode || '').toUpperCase();
             const type = _isRefundMode(mode) ? 'refund' : (_isReturnMode(mode) ? 'return' : '');
             if(!type) return;
-            const rows = whSheetsAggregateProducts(info.products || []);
+
+            let rows = Array.isArray(info.rows) ? info.rows : null;
+            if(!rows) {
+                if(Array.isArray(info.products)) rows = whSheetsAggregateProducts(info.products);
+                else rows = whSheetsRowsFromProductsText(info.productsText || info.prods || '');
+            }
+            rows = (rows || []).filter(function(r){ return r && r.product && Number(r.qty || 0) > 0; });
             if(!rows.length) return;
+
+            const key = type + ':' + (info.registoKey || String(info.endTs || Date.now()));
+            if(__whSheetsReturnRefundSyncedKeys.has(key)) return;
+            __whSheetsReturnRefundSyncedKeys.add(key);
+
             await whSheetsPost({
                 type: type,
                 // Dedupe key only; do not send order ID/tracking to RETURNS_REFUNDS.
-                source_key: type + ':' + (info.registoKey || String(info.endTs || Date.now())),
+                source_key: key,
                 date: info.date || _nowDateClean(),
+                // COMPLETE and INCOMPLETE records are both accepted here; status is not used as a filter.
+                status: info.status || '',
                 rows: rows
             });
         } catch(e) {
             console.error('Erro ao enviar RETURN/REFUND para Google Sheets:', e);
             uiAlert('Registo guardado, mas falhou o envio automático para Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
+        }
+    }
+
+    function whSheetsSyncReturnRefundRecord(registoKey, record) {
+        try {
+            const r = record || {};
+            const m = String(r.mode || '').toUpperCase();
+            if(!_isReturnMode(m) && !_isRefundMode(m)) return;
+            // Sync both COMPLETE and INCOMPLETE returns/refunds.
+            // This also catches records created by any existing return/refund flow, not only confirmOrder().
+            whSheetsSendReturnRefund({
+                mode: m,
+                registoKey: registoKey,
+                productsText: r.prods || '',
+                date: r.dateClean || _nowDateClean(),
+                status: r.returnStatus || 'COMPLETE',
+                endTs: r.endTs || r.ts || Date.now()
+            });
+        } catch(e) {
+            console.warn('whSheetsSyncReturnRefundRecord error:', e);
         }
     }
 
@@ -2342,6 +2385,7 @@ function handleScan(v, mode) {
                     registoKey: (typeof whRegistoRef !== 'undefined' && whRegistoRef && whRegistoRef.key) ? whRegistoRef.key : '',
                     products: scanData.prods.slice(),
                     date: dc,
+                    status: whRegistoPayload.returnStatus || 'COMPLETE',
                     endTs: endTs
                 });
             }
@@ -6127,7 +6171,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         __offReturnCb = snap => {
             tbody.innerHTML = "";
             const rows = [];
-            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isReturnMode(m) || r.dateClean!==today) return; rows.push({k,r}); });
+            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isReturnMode(m) || r.dateClean!==today) return; whSheetsSyncReturnRefundRecord(k, r); rows.push({k,r}); });
             rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="removeRecentReturnRefund('${k}', 'RETURN')">X</button></td></tr>`; });
         };
         __offReturnRef.on('value', __offReturnCb);
@@ -6142,7 +6186,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         __offRefundCb = snap => {
             tbody.innerHTML = "";
             const rows = [];
-            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isRefundMode(m) || r.dateClean!==today) return; rows.push({k,r}); });
+            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isRefundMode(m) || r.dateClean!==today) return; whSheetsSyncReturnRefundRecord(k, r); rows.push({k,r}); });
             rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="removeRecentReturnRefund('${k}', 'REFUND')">X</button></td></tr>`; });
         };
         __offRefundRef.on('value', __offRefundCb);
