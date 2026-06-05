@@ -2150,6 +2150,56 @@ document.addEventListener('click', (e) => {
         }
     }
 
+    function whSheetsInventoryRowsFromBatch(batch) {
+        const inv = (batch && batch.inventory) ? batch.inventory : {};
+        return Object.entries(inv).map(function(entry){
+            const key = String(entry[0] || '').trim().toUpperCase();
+            const item = entry[1] || {};
+            const qty = parseInt(item.q || item.qty || item.quantity || 0, 10) || 0;
+            const pos = String(item.pos || item.position || '').trim();
+            if(!key || qty <= 0) return null;
+            return { product: key, qty: qty, pos: pos };
+        }).filter(Boolean);
+    }
+
+    async function whSheetsResyncPickingBatch(batchId, reason) {
+        try {
+            if(!batchId) return;
+            const snap = await db.ref('active_batches/' + batchId).once('value');
+            const batch = snap.val();
+            if(!batch) return;
+            const rows = whSheetsInventoryRowsFromBatch(batch);
+            await whSheetsPost({
+                type: 'picking_replace',
+                source_key: 'picking:' + batchId,
+                date: batch.dateClean || _nowDateClean(),
+                batch: batch.name || batchId,
+                carrier: batch.carrier || '',
+                user: (currentUser && currentUser.email ? currentUser.email.split('@')[0].toUpperCase() : ''),
+                observations: 'Auto sync update from WH OFFICE' + (reason ? ' | ' + reason : ''),
+                rows: rows
+            });
+        } catch(e) {
+            console.error('Erro ao atualizar PICKING no Google Sheets:', e);
+            uiAlert('Alteração guardada, mas falhou a atualização automática no Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
+        }
+    }
+
+    async function whSheetsDeletePickingBatch(batchId, reason) {
+        try {
+            if(!batchId) return;
+            await whSheetsPost({
+                type: 'picking_delete',
+                source_key: 'picking:' + batchId,
+                user: (currentUser && currentUser.email ? currentUser.email.split('@')[0].toUpperCase() : ''),
+                reason: reason || 'Batch deleted in WH OFFICE'
+            });
+        } catch(e) {
+            console.error('Erro ao apagar lote no Google Sheets:', e);
+            uiAlert('Lote apagado no sistema, mas falhou a remoção automática no Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
+        }
+    }
+
     async function whSheetsSendReturnRefund(info) {
         try {
             info = info || {};
@@ -2168,6 +2218,36 @@ document.addEventListener('click', (e) => {
         } catch(e) {
             console.error('Erro ao enviar RETURN/REFUND para Google Sheets:', e);
             uiAlert('Registo guardado, mas falhou o envio automático para Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
+        }
+    }
+
+    async function whSheetsDeleteReturnRefund(registoKey, mode) {
+        try {
+            registoKey = String(registoKey || '').trim();
+            if(!registoKey) return;
+            const m = String(mode || '').toUpperCase();
+            const type = _isRefundMode(m) ? 'refund' : (_isReturnMode(m) ? 'return' : '');
+            if(!type) return;
+            await whSheetsPost({
+                type: type + '_delete',
+                source_key: type + ':' + registoKey,
+                reason: 'Return/refund deleted in WH system'
+            });
+        } catch(e) {
+            console.error('Erro ao apagar RETURN/REFUND no Google Sheets:', e);
+            uiAlert('Registo apagado no sistema, mas falhou a remoção automática no Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
+        }
+    }
+
+    async function removeRecentReturnRefund(registoKey, mode) {
+        try {
+            registoKey = String(registoKey || '').trim();
+            if(!registoKey) return;
+            await whSheetsDeleteReturnRefund(registoKey, mode);
+            await db.ref('registos/' + registoKey).remove();
+        } catch(e) {
+            console.error('Erro ao apagar registo RETURN/REFUND:', e);
+            uiAlert('Erro ao apagar registo.', {type:'error', duration:5000});
         }
     }
 
@@ -3487,6 +3567,7 @@ function logBatchAction(bId, msg) {
 
             await db.ref(`active_batches/${batchId}/inventory/${skuKey}/q`).set(newQty);
             logBatchAction(batchId, `INV QTY UPDATE: ${skuKey} | ${prevQty} -> ${newQty}`);
+            await whSheetsResyncPickingBatch(batchId, `INV QTY UPDATE: ${skuKey} | ${prevQty} -> ${newQty}`);
         } catch (e) {
             console.error(e);
             uiAlert("Erro ao atualizar quantidade.");
@@ -3498,6 +3579,7 @@ function logBatchAction(bId, msg) {
             if (!await uiConfirm(`Remover o produto ${skuKey} do inventário?`)) return;
             await db.ref(`active_batches/${batchId}/inventory/${skuKey}`).remove();
             logBatchAction(batchId, `INV ITEM REMOVED: ${skuKey} | was ${oldQty}`);
+            await whSheetsResyncPickingBatch(batchId, `INV ITEM REMOVED: ${skuKey} | was ${oldQty}`);
         } catch (e) {
             console.error(e);
             uiAlert("Erro ao remover produto.");
@@ -4832,7 +4914,10 @@ function showMetadata(id) {
         //    Não vai para deleted_batches para não contaminar o histórico/search/relatórios.
         await db.ref('purged_batches/' + id).set(archive);
 
-        // 3) Remove from active_batches so it disappears from WH picking immediately
+        // 3) Remove from Google Sheets PICKING (only the rows created for this batch)
+        await whSheetsDeletePickingBatch(id, 'Batch deleted in WH OFFICE');
+
+        // 4) Remove from active_batches so it disappears from WH picking immediately
         await db.ref('active_batches/' + id).remove();
 
         // Invalidar cache local
@@ -6029,7 +6114,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             tbody.innerHTML = "";
             const rows = [];
             snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isReturnMode(m) || r.dateClean!==today) return; rows.push({k,r}); });
-            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; });
+            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="removeRecentReturnRefund('${k}', 'RETURN')">X</button></td></tr>`; });
         };
         __offReturnRef.on('value', __offReturnCb);
     }
@@ -6044,7 +6129,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             tbody.innerHTML = "";
             const rows = [];
             snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isRefundMode(m) || r.dateClean!==today) return; rows.push({k,r}); });
-            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; });
+            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="removeRecentReturnRefund('${k}', 'REFUND')">X</button></td></tr>`; });
         };
         __offRefundRef.on('value', __offRefundCb);
     }
