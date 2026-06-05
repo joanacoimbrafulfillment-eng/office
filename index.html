@@ -2168,21 +2168,26 @@ document.addEventListener('click', (e) => {
             const snap = await db.ref('active_batches/' + batchId).once('value');
             const batch = snap.val();
             if(!batch) return;
-            const rows = whSheetsInventoryRowsFromBatch(batch);
-            await whSheetsPost({
-                type: 'picking_replace',
-                source_key: 'picking:' + batchId,
-                date: batch.dateClean || _nowDateClean(),
-                batch: batch.name || batchId,
-                carrier: batch.carrier || '',
-                user: (currentUser && currentUser.email ? currentUser.email.split('@')[0].toUpperCase() : ''),
-                observations: 'Auto sync update from WH OFFICE' + (reason ? ' | ' + reason : ''),
-                rows: rows
-            });
+            await whSheetsResyncPickingBatchFromData(batchId, batch, null, reason);
         } catch(e) {
             console.error('Erro ao atualizar PICKING no Google Sheets:', e);
             uiAlert('Alteração guardada, mas falhou a atualização automática no Google Sheets. Ver consola/configuração.', {type:'error', duration:7000});
         }
+    }
+
+    async function whSheetsResyncPickingBatchFromData(batchId, batch, inventoryOverride, reason) {
+        const b = batch || {};
+        const rows = whSheetsInventoryRowsFromBatch({ inventory: inventoryOverride || b.inventory || {} });
+        await whSheetsPost({
+            type: 'picking_replace',
+            source_key: 'picking:' + batchId,
+            date: b.dateClean || _nowDateClean(),
+            batch: b.name || batchId,
+            carrier: b.carrier || '',
+            user: (currentUser && currentUser.email ? currentUser.email.split('@')[0].toUpperCase() : ''),
+            observations: 'Auto sync update from WH OFFICE' + (reason ? ' | ' + reason : ''),
+            rows: rows
+        });
     }
 
     async function whSheetsDeletePickingBatch(batchId, reason) {
@@ -3375,7 +3380,7 @@ Se apenas quiser bloquear, use CANCELAR.`)) return;
 
             if(batchUsesPickingByIds(batch)){
                 // OPTIMISED: passa batch ja lido para evitar read extra
-                await recalcBatchInventoryFromIds(batchId, { cachedBatch: batch, markReprint:true, logMsg:'PICKING RECALCULADA POR ELIMINAR ID: ' + orderId });
+                await recalcBatchInventoryFromIds(batchId, { markReprint:true, logMsg:'PICKING RECALCULADA POR ELIMINAR ID: ' + orderId });
             } else {
                 logBatchAction(batchId, 'ID ELIMINADO: ' + orderId);
             }
@@ -5809,6 +5814,15 @@ function closeModal(id) {
             if(opts && opts.markReprint) updates['active_batches/' + batchId + '/pickingNeedsReprint'] = true;
             await db.ref('/').update(updates);
             if(opts && opts.logMsg) logBatchAction(batchId, opts.logMsg);
+
+            // Sempre que o Inventory Status é recalculado e a quantidade muda,
+            // substituir também o lote no Google Sheets/PICKING.
+            try {
+                await whSheetsResyncPickingBatchFromData(batchId, batch, inv, (opts && opts.logMsg) ? opts.logMsg : 'Inventory Status recalculated');
+            } catch(syncErr) {
+                console.error('Erro ao sincronizar Inventory Status recalculado no Google Sheets:', syncErr);
+                uiAlert('Picking recalculada, mas falhou a atualização automática no Google Sheets. Verifica consola/configuração.', {type:'error', duration:7000});
+            }
             return { ok:true, inventory:inv };
         }catch(e){
             console.error('recalcBatchInventoryFromIds error', e);
@@ -6572,7 +6586,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
             try{
                 const b0 = (_activeBatchesCache && _activeBatchesCache[batchId]) ? _activeBatchesCache[batchId] : {};
                 if(batchUsesPickingByIds(b0)){
-                    await recalcBatchInventoryFromIds(batchId, { cachedBatch: b0, markReprint:true, logMsg:`CANCELLED ID: ${orderId} | Reason: ${payload.reason} | PICKING RECALCULADA` });
+                    await recalcBatchInventoryFromIds(batchId, { markReprint:true, logMsg:`CANCELLED ID: ${orderId} | Reason: ${payload.reason} | PICKING RECALCULADA` });
                 } else {
                     logBatchAction(batchId, `CANCELLED ID: ${orderId} | Reason: ${payload.reason}`);
                 }
