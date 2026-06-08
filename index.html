@@ -2205,15 +2205,15 @@ document.addEventListener('click', (e) => {
         }
     }
 
-    const __whSheetsReturnRefundSyncedKeys = (typeof __whSheetsReturnRefundSyncedKeys !== 'undefined') ? __whSheetsReturnRefundSyncedKeys : new Set();
-
     function whSheetsRowsFromProductsText(text) {
         const items = String(text || '')
             .split('|')
             .map(function(x){ return x.trim(); })
-            .filter(function(x){ return x && x.toLowerCase() !== 'no items'; });
+            .filter(Boolean);
         return whSheetsAggregateProducts(items);
     }
+
+    const __whSheetsReturnRefundSyncedKeys = new Set();
 
     async function whSheetsSendReturnRefund(info) {
         try {
