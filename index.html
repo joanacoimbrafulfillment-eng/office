@@ -2068,9 +2068,8 @@ document.addEventListener('click', (e) => {
 
     // ============================================================
     // GOOGLE SHEETS AUTO SYNC (Option 1)
-    // - OFFICE / Create Batch -> PICKING sheet as SALES
-    // - RETURNS scanner -> RETURNS_REFUNDS sheet as return, product/qty only
-    // - REFUNDS scanner -> RETURNS_REFUNDS sheet as refund, product/qty only
+    // OFF: only OFFICE / Create Batch + Inventory Status -> PICKING sheet as SALES.
+    // RETURNS/REFUNDS are synced by the WH file, not by OFF, to avoid duplicates.
     // Configure once with the deployed Apps Script Web App URL.
     // Keep the same Web App every month; only update ACTIVE_SPREADSHEET_ID
     // in Apps Script properties when you copy the monthly inventory sheet.
@@ -2384,16 +2383,7 @@ function handleScan(v, mode) {
                     : (_isRefundMode(m) ? "Refund saved" : "Return saved")
             });
 
-            if(_isReturnMode(m) || _isRefundMode(m)) {
-                await whSheetsSendReturnRefund({
-                    mode: m,
-                    registoKey: (typeof whRegistoRef !== 'undefined' && whRegistoRef && whRegistoRef.key) ? whRegistoRef.key : '',
-                    products: scanData.prods.slice(),
-                    date: dc,
-                    status: whRegistoPayload.returnStatus || 'COMPLETE',
-                    endTs: endTs
-                });
-            }
+            // OFF does not sync RETURNS/REFUNDS to Sheets. WH handles RETURNS_REFUNDS.
 
             resetScan();
         } catch (e) {
@@ -6176,8 +6166,8 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         __offReturnCb = snap => {
             tbody.innerHTML = "";
             const rows = [];
-            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isReturnMode(m) || r.dateClean!==today) return; whSheetsSyncReturnRefundRecord(k, r); rows.push({k,r}); });
-            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="removeRecentReturnRefund('${k}', 'RETURN')">X</button></td></tr>`; });
+            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isReturnMode(m) || r.dateClean!==today) return; rows.push({k,r}); });
+            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; });
         };
         __offReturnRef.on('value', __offReturnCb);
     }
@@ -6191,8 +6181,8 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         __offRefundCb = snap => {
             tbody.innerHTML = "";
             const rows = [];
-            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isRefundMode(m) || r.dateClean!==today) return; whSheetsSyncReturnRefundRecord(k, r); rows.push({k,r}); });
-            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="removeRecentReturnRefund('${k}', 'REFUND')">X</button></td></tr>`; });
+            snap.forEach(ch => { const k = ch.key; const r = ch.val()||{}; const m = (r.mode||'').toUpperCase(); if(!_isRefundMode(m) || r.dateClean!==today) return; rows.push({k,r}); });
+            rows.reverse().forEach(({k,r}) => { tbody.innerHTML += `<tr><td>${r.time}</td><td><b>${r.id}</b></td><td>${r.prods}</td><td><button class="btn-small btn-delete" onclick="db.ref('registos/${k}').remove()">X</button></td></tr>`; });
         };
         __offRefundRef.on('value', __offRefundCb);
     }
