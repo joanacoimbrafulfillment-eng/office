@@ -6394,6 +6394,39 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
   }
 
   window.__perf_packing_by_id_cache = window.__perf_packing_by_id_cache || {};
+  window.__perf_batch_by_key_cache = window.__perf_batch_by_key_cache || {};
+
+  async function _loadPerformanceBatchMapForComparison(recordsById, returnRecords){
+    var keys = {};
+    (returnRecords || []).forEach(function(r){
+      var k = _fmt(r && r.batch).trim();
+      if(k && k !== 'GENERAL') keys[k] = true;
+    });
+    Object.keys(recordsById || {}).forEach(function(id){
+      if(id === '__batchData') return;
+      (recordsById[id] || []).forEach(function(r){
+        var k = _fmt(r && r.batch).trim();
+        if(k && k !== 'GENERAL') keys[k] = true;
+      });
+    });
+    var out = {};
+    await Promise.all(Object.keys(keys).map(async function(k){
+      try{
+        if(!window.__perf_batch_by_key_cache[k]){
+          var snaps = await Promise.all([
+            db.ref('active_batches/' + k).once('value'),
+            db.ref('deleted_batches/' + k).once('value')
+          ]);
+          window.__perf_batch_by_key_cache[k] = snaps[0].val() || snaps[1].val() || null;
+        }
+        out[k] = window.__perf_batch_by_key_cache[k];
+      }catch(e){
+        console.warn('Performance batch volume lookup failed for batch ' + k, e);
+        out[k] = null;
+      }
+    }));
+    return out;
+  }
 
   async function _loadPackingComparisonMap(records){
     var ids = {};
@@ -6415,6 +6448,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
         out[id] = [];
       }
     }));
+    out.__batchData = await _loadPerformanceBatchMapForComparison(out, records || []);
     return out;
   }
 
@@ -6445,10 +6479,24 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var packDate = _eventDateTime(pack);
     var packUser = _upperUser(pack.user || '');
     var packTracking = _fmt(pack.tracks || pack.track || '');
-    var packDetails = 'Packing: ' + packDate + ' | Operador: ' + packUser + ' | Tracking: ' + packTracking;
+    var batchMap = (packingRecordsById && packingRecordsById.__batchData) ? packingRecordsById.__batchData : {};
+    var packBatchKey = _fmt(pack.batch || (record && record.batch) || '').trim();
+    var packBatch = packBatchKey && batchMap[packBatchKey] ? batchMap[packBatchKey] : null;
+    var batchVolumes = 0;
+    try {
+      if(packBatch && packBatch.order_volumes && id && packBatch.order_volumes[id]) batchVolumes = Number(packBatch.order_volumes[id]) || 0;
+    } catch(_e) {}
+    var trackCount = 0;
+    try {
+      var tr = _fmt(pack.tracks || pack.track || '');
+      trackCount = tr ? tr.split('|').map(function(x){ return x.trim(); }).filter(Boolean).length : 0;
+    } catch(_e2) {}
+    var packVolumes = batchVolumes || Number(pack.volumes || 0) || trackCount || 1;
+    var packDetails = 'Packing: ' + packDate + ' | Operador: ' + packUser + ' | Volumes: ' + packVolumes + ' | Tracking: ' + packTracking;
     var packMetaHtml = '<div style="font-size:12px; color:#1e3a8a; font-weight:900; margin-bottom:7px; line-height:1.35;">'
       + '<div>📅 ' + _htmlEsc(packDate || '—') + '</div>'
       + '<div>👤 ' + _htmlEsc(packUser || '—') + '</div>'
+      + '<div>📦 Volumes: ' + _htmlEsc(packVolumes || 1) + '</div>'
       + '</div>';
     return {
       packedHtml: packMetaHtml + _formatCompareCountMap(packedMapAll),
