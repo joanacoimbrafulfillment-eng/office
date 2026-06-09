@@ -6258,6 +6258,286 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     setTimeout(function(){ URL.revokeObjectURL(url); }, 2500);
   }
 
+
+  function _htmlEsc(v){
+    return _fmt(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function _returnRefundStatus(r){
+    return (_fmt(r && r.returnStatus).toUpperCase() === 'INCOMPLETE') ? 'INCOMPLETE' : 'COMPLETE';
+  }
+
+  function _eventDateTime(r){
+    if(!r) return '';
+    var dc = _fmt(r.dateClean);
+    var tm = _fmt(r.endTime || r.time || r.startTime);
+    return _fmt(r.DateTime || (dc ? (dc + (tm ? ' ' + tm : '')) : tm));
+  }
+
+  function _perfStatusButton(type, status, count){
+    var isInc = status === 'INCOMPLETE';
+    var color = isInc ? '#f59e0b' : '#28a745';
+    var bg = isInc ? '#fff7ed' : '#f0fdf4';
+    var border = isInc ? '#fed7aa' : '#bbf7d0';
+    var icon = isInc ? '&#x26A0;&#xFE0F;' : '&#x2705;';
+    var label = isInc ? 'Incompletos' : 'Completos';
+    return '<button type="button" onclick="window.perfShowReturnRefundHistory(\''+type+'\',\''+status+'\')" '
+      + 'style="display:block; width:100%; text-align:left; margin-top:6px; padding:8px 10px; border-radius:10px; border:1.5px solid '+border+'; background:'+bg+'; color:'+color+'; cursor:pointer; font-weight:900; font-size:15px;">'
+      + icon + ' ' + label + ': <b>'+count+'</b> <span style="float:right; font-size:12px; color:#64748b; font-weight:900;">VER</span></button>';
+  }
+
+  function _returnRefundRecordsForStatus(type, status, regList, operatorUpper){
+    var wantRefund = (String(type || '').toUpperCase() === 'REFUNDS');
+    return (regList || []).filter(function(r){
+      if(!r) return false;
+      var mode = r.mode || '';
+      var modeOk = wantRefund ? _isRefundMode(mode) : _isReturnMode(mode);
+      if(!modeOk) return false;
+      if(_returnRefundStatus(r) !== status) return false;
+      if(operatorUpper && operatorUpper !== 'ALL' && _upperUser(r.user || '') !== operatorUpper) return false;
+      return true;
+    }).sort(function(a,b){
+      var ta = Number(a.ts || a.endTs || a.startTs || 0);
+      var tb = Number(b.ts || b.endTs || b.startTs || 0);
+      if(ta || tb) return tb - ta;
+      return _eventDateTime(b).localeCompare(_eventDateTime(a));
+    });
+  }
+
+  function _compareNormName(name){
+    return _fmt(name).trim().replace(/\s+/g, ' ').toUpperCase();
+  }
+
+  function _isExcludedFromReturnCompare(name){
+    var n = _compareNormName(name);
+    return n === 'WARRANTY PT' || n === 'WARRANTY ES' || n.indexOf('WARRANTY PT ') === 0 || n.indexOf('WARRANTY ES ') === 0;
+  }
+
+  function _countCompareItems(items, excludeWarranty){
+    var map = {};
+    (items || []).forEach(function(item){
+      var raw = _fmt(item).trim();
+      if(!raw || raw.toLowerCase() === 'no items') return;
+      if(excludeWarranty && _isExcludedFromReturnCompare(raw)) return;
+      var key = _compareNormName(raw);
+      if(!key) return;
+      if(!map[key]) map[key] = {name: raw, qty: 0};
+      map[key].qty += 1;
+    });
+    return map;
+  }
+
+  function _formatCompareCountMap(map){
+    var arr = Object.keys(map || {}).sort().map(function(k){
+      var it = map[k];
+      return _htmlEsc(it.name || k) + (it.qty > 1 ? ' <b>x' + it.qty + '</b>' : '');
+    });
+    return arr.length ? arr.join('<br>') : '<span style="color:#999;">—</span>';
+  }
+
+  function _diffCompareMaps(expectedMap, actualMap){
+    var missing = [];
+    var extra = [];
+    Object.keys(expectedMap || {}).forEach(function(k){
+      var need = (expectedMap[k] && expectedMap[k].qty) || 0;
+      var got = (actualMap[k] && actualMap[k].qty) || 0;
+      if(got < need) missing.push({name:(expectedMap[k].name || k), need:need, got:got, diff:need-got});
+    });
+    Object.keys(actualMap || {}).forEach(function(k){
+      var got = (actualMap[k] && actualMap[k].qty) || 0;
+      var need = (expectedMap[k] && expectedMap[k].qty) || 0;
+      if(got > need) extra.push({name:(actualMap[k].name || k), need:need, got:got, diff:got-need});
+    });
+    return {missing: missing, extra: extra};
+  }
+
+  function _formatCompareDiff(diff){
+    var parts = [];
+    if(diff && diff.missing && diff.missing.length){
+      parts.push('<div style="color:#b91c1c; font-weight:900; margin-bottom:4px;">Faltam</div>');
+      parts.push(diff.missing.map(function(x){ return _htmlEsc(x.name) + ' <b>(' + x.got + '/' + x.need + ')</b>'; }).join('<br>'));
+    }
+    if(diff && diff.extra && diff.extra.length){
+      parts.push('<div style="color:#b45309; font-weight:900; margin:' + (parts.length ? '8px' : '0') + ' 0 4px;">Extra</div>');
+      parts.push(diff.extra.map(function(x){ return _htmlEsc(x.name) + ' <b>+' + x.diff + '</b>'; }).join('<br>'));
+    }
+    if(!parts.length) return '<span style="color:#166534; font-weight:900;">OK</span>';
+    return parts.join('');
+  }
+
+  function _returnRefundProductsForCompare(record){
+    // For partial returns/refunds, allProds contains previous incomplete scans + current scan.
+    // If absent, fall back to prods so old records still display correctly.
+    return _splitProductsField((record && (record.allProds || record.prods)) || '');
+  }
+
+  function _bestPackingRecordForReturn(returnRecord, candidateRecords){
+    var rid = _fmt(returnRecord && returnRecord.id).trim();
+    if(!rid) return null;
+    var retTs = Number((returnRecord && (returnRecord.ts || returnRecord.endTs || returnRecord.startTs)) || 0);
+    var packs = (candidateRecords || []).filter(function(r){
+      return r && _fmt(r.id).trim() === rid && String(r.mode || '').toUpperCase() === 'PACKING';
+    });
+    if(!packs.length) return null;
+    packs.sort(function(a,b){
+      var ta = Number(a.ts || a.endTs || a.startTs || 0);
+      var tb = Number(b.ts || b.endTs || b.startTs || 0);
+      return tb - ta;
+    });
+    if(retTs){
+      for(var i=0; i<packs.length; i++){
+        var pTs = Number(packs[i].ts || packs[i].endTs || packs[i].startTs || 0);
+        if(!pTs || pTs <= retTs) return packs[i];
+      }
+    }
+    return packs[0];
+  }
+
+  window.__perf_packing_by_id_cache = window.__perf_packing_by_id_cache || {};
+
+  async function _loadPackingComparisonMap(records){
+    var ids = {};
+    (records || []).forEach(function(r){
+      var id = _fmt(r && r.id).trim();
+      if(id) ids[id] = true;
+    });
+    var idList = Object.keys(ids);
+    var out = {};
+    await Promise.all(idList.map(async function(id){
+      try{
+        if(!window.__perf_packing_by_id_cache[id]){
+          var snap = await db.ref('registos').orderByChild('id').equalTo(id).once('value');
+          window.__perf_packing_by_id_cache[id] = Object.values(snap.val() || {}).filter(Boolean);
+        }
+        out[id] = window.__perf_packing_by_id_cache[id];
+      }catch(e){
+        console.warn('Performance packing comparison failed for ID ' + id, e);
+        out[id] = [];
+      }
+    }));
+    return out;
+  }
+
+  function _buildCompareBlock(record, packingRecordsById){
+    var id = _fmt(record && record.id).trim();
+    var candidates = (packingRecordsById && packingRecordsById[id]) ? packingRecordsById[id] : [];
+    var pack = _bestPackingRecordForReturn(record, candidates);
+    var returnedItems = _returnRefundProductsForCompare(record);
+    var returnedMapAll = _countCompareItems(returnedItems, false);
+    var returnedMapRelevant = _countCompareItems(returnedItems, true);
+
+    if(!pack){
+      return {
+        packedHtml: '<span style="color:#b91c1c; font-weight:900;">Packing não encontrado</span>',
+        returnedHtml: _formatCompareCountMap(returnedMapAll),
+        diffHtml: '<span style="color:#b91c1c; font-weight:900;">Sem comparação</span>',
+        packDetails: ''
+      };
+    }
+
+    var packedItems = _splitProductsField(pack.prods);
+    var packedMapAll = _countCompareItems(packedItems, false);
+    var packedMapRelevant = _countCompareItems(packedItems, true);
+    var diff = _diffCompareMaps(packedMapRelevant, returnedMapRelevant);
+    var packDetails = 'Packing: ' + _eventDateTime(pack) + ' | Operador: ' + _upperUser(pack.user || '') + ' | Tracking: ' + _fmt(pack.tracks || pack.track || '');
+    return {
+      packedHtml: _formatCompareCountMap(packedMapAll),
+      returnedHtml: _formatCompareCountMap(returnedMapAll),
+      diffHtml: _formatCompareDiff(diff),
+      packDetails: packDetails
+    };
+  }
+
+  function _buildReturnRefundStatusHistory(type, status, dateClean, regList, operatorUpper, packingRecordsById){
+    var statusLabel = (status === 'INCOMPLETE') ? 'Incompletos' : 'Completos';
+    var filtered = _returnRefundRecordsForStatus(type, status, regList, operatorUpper);
+
+    var opTxt = (operatorUpper && operatorUpper !== 'ALL') ? (' | Operador: ' + operatorUpper) : ' | Operador: Todos';
+    if(!filtered.length){
+      return '<div class="card" style="border-left:5px solid '+(status === 'INCOMPLETE' ? '#f59e0b' : '#28a745')+';">'
+        + '<b>'+_htmlEsc(type)+' '+_htmlEsc(statusLabel)+'</b>'
+        + '<div style="font-size:13px; color:#666; margin-top:6px;">Dia: <b>'+_htmlEsc(dateClean)+'</b>'+_htmlEsc(opTxt)+'</div>'
+        + '<div style="margin-top:12px; color:#666;">Sem histórico para este filtro.</div>'
+        + '</div>';
+    }
+
+    var totalProducts = filtered.reduce(function(acc,r){ return acc + _countProducts(r.allProds || r.prods); }, 0);
+    var html = '<div class="card" style="border-left:5px solid '+(status === 'INCOMPLETE' ? '#f59e0b' : '#28a745')+';">';
+    html += '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">';
+    html += '<div><b>'+_htmlEsc(type)+' '+_htmlEsc(statusLabel)+'</b>';
+    html += '<div style="font-size:13px; color:#666; margin-top:4px;">Dia: <b>'+_htmlEsc(dateClean)+'</b>'+_htmlEsc(opTxt)+'</div></div>';
+    html += '<div style="font-size:13px; color:#334155; font-weight:900;">IDs: '+filtered.length+' | Produtos picados: '+totalProducts+'</div>';
+    html += '</div>';
+    html += '<div style="font-size:12px; color:#64748b; margin-top:8px;">A comparação ignora warranties na diferença, mas mostra tudo em Embalado/Picado.</div>';
+    html += '<div style="overflow:auto; margin-top:12px; max-height:520px; border:1px solid #e5e7eb; border-radius:12px;">';
+    html += '<table style="width:100%; border-collapse:collapse;">';
+    html += '<thead><tr style="text-align:left;">'
+      + '<th style="padding:8px; border-bottom:1px solid #eee;">Hora</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee;">ID</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee;">Operador</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee;">Tracking</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:220px;">Embalado</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:220px;">Picado '+_htmlEsc(type)+'</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:180px;">Diferença</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee;">Estado</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee;">Detalhes</th>'
+      + '</tr></thead><tbody>';
+
+    filtered.forEach(function(r){
+      var compare = _buildCompareBlock(r, packingRecordsById || {});
+      var productsArr = _returnRefundProductsForCompare(r);
+      var stateBadge = status === 'INCOMPLETE'
+        ? '<span style="background:#fff7ed; color:#b45309; border:1px solid #fed7aa; padding:4px 8px; border-radius:8px; font-weight:900;">INCOMPLETO</span>'
+        : '<span style="background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; padding:4px 8px; border-radius:8px; font-weight:900;">COMPLETO</span>';
+      var details = [];
+      if(r.batch) details.push('Batch: ' + _fmt(r.batch));
+      if(r.startTime) details.push('Start: ' + _fmt(r.startTime));
+      if(r.endTime || r.time) details.push('End: ' + _fmt(r.endTime || r.time));
+      if(r.prevProds) details.push('Prev: ' + _fmt(r.prevProds));
+      if(r.allProds) details.push('Total combinado: ' + _fmt(r.allProds));
+      if(compare.packDetails) details.push(compare.packDetails);
+      html += '<tr style="vertical-align:top;'+(status === 'INCOMPLETE' ? ' background:#fffaf0;' : '')+'">'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; white-space:nowrap;">'+_htmlEsc(_eventDateTime(r))+'</td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-weight:900;">'+_htmlEsc(r.id)+'</td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6;">'+_htmlEsc(_upperUser(r.user))+'</td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6;">'+_htmlEsc(r.tracks || r.track)+'</td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; line-height:1.45;">'+compare.packedHtml+'</td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; line-height:1.45;">'+compare.returnedHtml+'<div style="margin-top:6px; color:#64748b; font-weight:900;">Qtd: '+productsArr.length+'</div></td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; line-height:1.45;">'+compare.diffHtml+'</td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6;">'+stateBadge+'</td>'
+        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; color:#555; min-width:220px;">'+_htmlEsc(details.join(' | '))+'</td>'
+        + '</tr>';
+    });
+
+    html += '</tbody></table></div></div>';
+    return html;
+  }
+
+  window.perfShowReturnRefundHistory = async function(type, status){
+    var state = window.__perf_last;
+    if(!state) return uiAlert("Primeiro clica em 'Carregar resumo diário'.");
+    var opEl = document.getElementById('perf-operator');
+    var operator = opEl ? (opEl.value || 'ALL') : 'ALL';
+    var t = String(type || '').toUpperCase();
+    var s = String(status || '').toUpperCase();
+    var wrap = document.getElementById('perf-history-wrap');
+    var list = document.getElementById('perf-history-list');
+    if(wrap) wrap.style.display = 'block';
+    if(!list) return;
+
+    var records = _returnRefundRecordsForStatus(t, s, state.regList, operator);
+    list.innerHTML = '<div class="card">A carregar histórico e comparação com Packing...</div>';
+    try{
+      var packingMap = await _loadPackingComparisonMap(records);
+      list.innerHTML = _buildReturnRefundStatusHistory(t, s, state.day, state.regList, operator, packingMap);
+      try { list.scrollIntoView({behavior:'smooth', block:'start'}); } catch(_e) {}
+    }catch(e){
+      console.error('Performance comparison history error:', e);
+      list.innerHTML = _buildReturnRefundStatusHistory(t, s, state.day, state.regList, operator, {});
+      uiAlert('Histórico carregado, mas falhou a comparação com Packing para alguns IDs.', {type:'error', duration:7000});
+    }
+  };
+
   async function _loadDayData(dateClean){
     // registos: packing + returns
     // pre_packing: prepack actions
@@ -6366,8 +6646,8 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var html = '';
     html += '<div class="grid-2" style="margin-top:10px;">';
     html += '  <div class="card"><b>PACKING (dia)</b><div style="margin-top:8px;">IDs embalados: <b>'+totalPackedIds+'</b><br>Produtos embalados: <b>'+totalPackedProducts+'</b></div></div>';
-    html += '  <div class="card"><b>RETURNS (dia)</b><div style="margin-top:8px;">IDs returns: <b>'+totalReturnIds+'</b><br>Produtos returns: <b>'+totalReturnProducts+'</b><br><span style="color:#28a745;">&#x2705; Completos: <b>'+totalReturnComplete+'</b></span><br><span style="color:#f59e0b;">&#x26A0;&#xFE0F; Incompletos: <b>'+totalReturnIncomplete+'</b></span></div></div>';
-    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b><br><span style="color:#28a745;">&#x2705; Completos: <b>'+totalRefundComplete+'</b></span><br><span style="color:#f59e0b;">&#x26A0;&#xFE0F; Incompletos: <b>'+totalRefundIncomplete+'</b></span></div></div>';
+    html += '  <div class="card"><b>RETURNS (dia)</b><div style="margin-top:8px;">IDs returns: <b>'+totalReturnIds+'</b><br>Produtos returns: <b>'+totalReturnProducts+'</b>' + _perfStatusButton('RETURNS','COMPLETE',totalReturnComplete) + _perfStatusButton('RETURNS','INCOMPLETE',totalReturnIncomplete) + '</div></div>';
+    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b>' + _perfStatusButton('REFUNDS','COMPLETE',totalRefundComplete) + _perfStatusButton('REFUNDS','INCOMPLETE',totalRefundIncomplete) + '</div></div>';
     html += '</div>';
 
     html += '<div class="card" style="margin-top:10px;"><b>PRE-PACKING (dia)</b><div style="margin-top:8px;">Registos pre-packing: <b>'+totalPrepackIds+'</b><br>Produtos em pre-packing: <b>'+totalPrepackProducts+'</b></div></div>';
