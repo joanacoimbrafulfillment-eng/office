@@ -6428,9 +6428,12 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
 
     if(!pack){
       return {
-        packedHtml: '<span style="color:#b91c1c; font-weight:900;">Packing não encontrado</span>',
+        packedHtml: '<div style="font-weight:900; color:#b91c1c; margin-bottom:6px;">Packing não encontrado</div>',
         returnedHtml: _formatCompareCountMap(returnedMapAll),
         diffHtml: '<span style="color:#b91c1c; font-weight:900;">Sem comparação</span>',
+        packDateHtml: '<span style="color:#b91c1c; font-weight:900;">Não encontrado</span>',
+        packUserHtml: '<span style="color:#999;">—</span>',
+        packTrackingHtml: '<span style="color:#999;">—</span>',
         packDetails: ''
       };
     }
@@ -6439,11 +6442,21 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var packedMapAll = _countCompareItems(packedItems, false);
     var packedMapRelevant = _countCompareItems(packedItems, true);
     var diff = _diffCompareMaps(packedMapRelevant, returnedMapRelevant);
-    var packDetails = 'Packing: ' + _eventDateTime(pack) + ' | Operador: ' + _upperUser(pack.user || '') + ' | Tracking: ' + _fmt(pack.tracks || pack.track || '');
+    var packDate = _eventDateTime(pack);
+    var packUser = _upperUser(pack.user || '');
+    var packTracking = _fmt(pack.tracks || pack.track || '');
+    var packDetails = 'Packing: ' + packDate + ' | Operador: ' + packUser + ' | Tracking: ' + packTracking;
+    var packMetaHtml = '<div style="font-size:12px; color:#1e3a8a; font-weight:900; margin-bottom:7px; line-height:1.35;">'
+      + '<div>📅 ' + _htmlEsc(packDate || '—') + '</div>'
+      + '<div>👤 ' + _htmlEsc(packUser || '—') + '</div>'
+      + '</div>';
     return {
-      packedHtml: _formatCompareCountMap(packedMapAll),
+      packedHtml: packMetaHtml + _formatCompareCountMap(packedMapAll),
       returnedHtml: _formatCompareCountMap(returnedMapAll),
       diffHtml: _formatCompareDiff(diff),
+      packDateHtml: _htmlEsc(packDate || '—'),
+      packUserHtml: _htmlEsc(packUser || '—'),
+      packTrackingHtml: _htmlEsc(packTracking || '—'),
       packDetails: packDetails
     };
   }
@@ -6472,10 +6485,10 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     html += '<div style="overflow:auto; margin-top:12px; max-height:520px; border:1px solid #e5e7eb; border-radius:12px;">';
     html += '<table style="width:100%; border-collapse:collapse;">';
     html += '<thead><tr style="text-align:left;">'
-      + '<th style="padding:8px; border-bottom:1px solid #eee;">Hora</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee; white-space:nowrap;">Data/Hora '+_htmlEsc(type)+'</th>'
       + '<th style="padding:8px; border-bottom:1px solid #eee;">ID</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee;">Operador</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee;">Tracking</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee; white-space:nowrap;">Operador '+_htmlEsc(type)+'</th>'
+      + '<th style="padding:8px; border-bottom:1px solid #eee;">Tracking '+_htmlEsc(type)+'</th>'
       + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:220px;">Embalado</th>'
       + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:220px;">Picado '+_htmlEsc(type)+'</th>'
       + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:180px;">Diferença</th>'
