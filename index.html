@@ -232,6 +232,59 @@
         .tbl-head { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
 
         /* Responsive media queries adicionais */
+        /* PERFORMANCE / REPORTS: keep wide history tables inside their own scroll area */
+        html, body { max-width: 100%; overflow-x: hidden !important; }
+        .nav-bar { left: 0; right: 0; max-width: 100vw; overflow-x: auto; overflow-y: hidden; box-sizing: border-box; }
+        #main-interface, .container, .section, .card { max-width: 100%; box-sizing: border-box; }
+        #sec-performance { max-width: 100%; overflow-x: hidden; }
+        #sec-performance .card { max-width: 100%; box-sizing: border-box; }
+        #perf-history-wrap { max-width: 100%; overflow-x: hidden; }
+        #perf-history-list { max-width: 100%; overflow-x: hidden; }
+        #perf-history-list .card { max-width: 100%; overflow-x: hidden; }
+        #perf-history-list table { max-width: none; }
+        .perf-scroll-table { width:100%; max-width:100%; overflow-x:auto; overflow-y:auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+        .perf-scroll-table table { width:100%; min-width:1080px; max-width:none; table-layout:auto; }
+        .perf-sticky-reset { transform: translateZ(0); }
+        .perf-details-cell { min-width: 320px; max-width: 520px; white-space: normal !important; overflow-wrap: anywhere; word-break: normal; line-height: 1.45; }
+        .perf-full-details-cell { white-space: normal !important; overflow-wrap: anywhere; word-break: normal; line-height: 1.45; background:#fff; color:#475569; }
+        .perf-detail-box { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-top: 1px solid #e5e7eb; padding-top: 4px; }
+        .perf-detail-line { display:block; margin:0 0 5px 0; }
+        .perf-detail-label { font-weight:900; color:#334155; }
+
+        .perf-rr-list { margin-top:12px; display:flex; flex-direction:column; gap:12px; max-height:650px; overflow-y:auto; overflow-x:hidden; padding-right:6px; box-sizing:border-box; }
+        .perf-rr-card { max-width:100%; box-sizing:border-box; border:1px solid #e5e7eb; border-radius:14px; background:#fff; overflow:hidden; }
+        .perf-rr-card--warn { background:#fffaf0; }
+        .perf-rr-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start; padding:12px 14px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
+        .perf-rr-title { font-weight:1000; color:#0f172a; font-size:14px; line-height:1.35; }
+        .perf-rr-sub { margin-top:4px; color:#64748b; font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
+        .perf-rr-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:0; }
+        .perf-rr-cell { min-width:0; padding:12px 14px; border-right:1px solid #eef2f7; border-bottom:1px solid #eef2f7; font-size:12px; line-height:1.45; overflow-wrap:anywhere; word-break:normal; }
+        .perf-rr-cell:nth-child(3n) { border-right:0; }
+        .perf-rr-label { display:block; margin-bottom:7px; font-size:11px; font-weight:1000; color:#475569; text-transform:uppercase; letter-spacing:.35px; }
+        .perf-rr-details { padding:12px 14px; font-size:12px; line-height:1.45; overflow-wrap:anywhere; background:#fff; }
+        @media (max-width: 1050px) { .perf-rr-grid { grid-template-columns:1fr; } .perf-rr-cell { border-right:0; } }
+
+
+        /* PERFORMANCE return/refund history: full visible mobile-safe cards */
+        .perf-rr-list { height:auto !important; min-height:0 !important; }
+        .perf-rr-card, .perf-rr-head, .perf-rr-grid, .perf-rr-cell, .perf-rr-details {
+            height:auto !important; min-height:0 !important; max-height:none !important;
+            overflow:visible !important; white-space:normal !important; box-sizing:border-box !important;
+        }
+        .perf-rr-card * { max-width:100%; box-sizing:border-box; }
+        .perf-rr-simple-list { margin-top:12px; max-height:720px; overflow-y:auto; overflow-x:hidden; padding:4px 8px 12px 0; box-sizing:border-box; }
+        .perf-rr-simple-card { display:block; width:100%; height:auto; min-height:0; margin:0 0 14px 0; border:1px solid #dbe3ef; border-radius:16px; background:#fff; overflow:visible; box-sizing:border-box; box-shadow:0 2px 8px rgba(15,23,42,.04); }
+        .perf-rr-simple-card--warn { background:#fffaf0; border-color:#fed7aa; }
+        .perf-rr-simple-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; padding:14px 16px; border-bottom:1px solid #e5e7eb; background:#f8fafc; border-radius:16px 16px 0 0; }
+        .perf-rr-simple-title { font-size:15px; font-weight:1000; color:#0f172a; line-height:1.45; overflow-wrap:anywhere; }
+        .perf-rr-simple-meta { margin-top:5px; font-size:12px; color:#475569; line-height:1.45; overflow-wrap:anywhere; }
+        .perf-rr-simple-cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; padding:14px 16px; border-bottom:1px solid #eef2f7; }
+        .perf-rr-simple-box { min-width:0; background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:12px; font-size:12px; line-height:1.5; overflow-wrap:anywhere; white-space:normal; }
+        .perf-rr-simple-label { display:block; margin-bottom:7px; font-size:11px; font-weight:1000; color:#475569; text-transform:uppercase; letter-spacing:.35px; }
+        .perf-rr-simple-diff { padding:14px 16px; border-bottom:1px solid #eef2f7; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+        .perf-rr-simple-details { padding:14px 16px; font-size:12px; line-height:1.5; overflow-wrap:anywhere; white-space:normal; }
+        @media (max-width: 850px) { .perf-rr-simple-cols { grid-template-columns:1fr; } .perf-rr-simple-head { display:block; } }
+
         @media (max-width: 600px)  {
             .grid-2 { grid-template-columns: 1fr; }
             .nav-item { padding: 20px 10px; font-size: 10px; }
@@ -1622,12 +1675,53 @@ document.addEventListener('click', (e) => {
             if (lbl) { lbl.style.background = '#f1f5f9'; lbl.style.borderColor = '#cbd5e1'; }
         });
     };
+    // ── RETURNS/REFUNDS CLOSE STATUS HELPERS (GLOBAL) ─────────────────────
+    // Used by Reports/Search exports and by Performance. Keep global because
+    // exportData() is outside the Performance IIFE.
+    function _returnRefundCloseKey(r){
+        var st = (r && r.returnStatus !== undefined && r.returnStatus !== null) ? String(r.returnStatus).toUpperCase().trim() : '';
+        var reason = (r && r.refundReason !== undefined && r.refundReason !== null) ? String(r.refundReason).toUpperCase().trim() : '';
+        var prods = (r && r.prods !== undefined && r.prods !== null) ? String(r.prods).toUpperCase().trim() : '';
+
+        if(st === 'SWIPE' || reason === 'SWIPE' || prods === 'SWIPE') return 'SWIPE';
+
+        if(
+            st === 'NO_PRODUCT_DAMAGED' ||
+            st === 'NO PRODUCT DAMAGED' ||
+            st === 'SEM PRODUTO/PRODUTO DANIFICADO' ||
+            reason === 'NO_PRODUCT_DAMAGED' ||
+            reason === 'NO PRODUCT DAMAGED' ||
+            reason === 'SEM PRODUTO/PRODUTO DANIFICADO' ||
+            prods === 'NO_PRODUCT_DAMAGED' ||
+            prods === 'NO PRODUCT DAMAGED' ||
+            prods === 'SEM PRODUTO/PRODUTO DANIFICADO'
+        ) return 'NO_PRODUCT_DAMAGED';
+
+        if(st === 'INCOMPLETE' || st === 'INCOMPLETO') return 'INCOMPLETE';
+        return 'COMPLETE';
+    }
+
+    function _returnRefundCloseMeta(status){
+        var s = String(status || 'COMPLETE').toUpperCase().trim();
+        if(s === 'INCOMPLETE' || s === 'INCOMPLETO') {
+            return { key:'INCOMPLETE', label:'Incompleto', plural:'Incompletos', icon:'⚠️', color:'#f59e0b', bg:'#fff7ed', border:'#fed7aa' };
+        }
+        if(s === 'SWIPE') {
+            return { key:'SWIPE', label:'SWIPE', plural:'SWIPE', icon:'⇄', color:'#0ea5e9', bg:'#eff6ff', border:'#bfdbfe' };
+        }
+        if(s === 'NO_PRODUCT_DAMAGED' || s === 'NO PRODUCT DAMAGED' || s === 'SEM PRODUTO/PRODUTO DANIFICADO') {
+            return { key:'NO_PRODUCT_DAMAGED', label:'Sem produto/produto danificado', plural:'Sem produto/produto danificado', icon:'🚫', color:'#475569', bg:'#f8fafc', border:'#cbd5e1' };
+        }
+        return { key:'COMPLETE', label:'Completo', plural:'Completos', icon:'✅', color:'#28a745', bg:'#f0fdf4', border:'#bbf7d0' };
+    }
+
     // ─────────────────────────────────────────────────────────────────────
 
     async function exportData(type) {
         const start = document.getElementById('rep-start-date').value;
         const end = document.getElementById('rep-end-date').value;
         const dataToExport = [];
+        const extraSheets = [];
 
         // ── Validação de datas (evita erro 400 do Firebase com startAt/endAt vazios) ──
         const dateRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -1664,6 +1758,8 @@ document.addEventListener('click', (e) => {
                     if (!carrierAllowed(carrier)) return; // ← filtro transportadora
                     const rawMode = (r.mode || '').toString().toUpperCase();
                     const normalizedMode = (rawMode === 'PACKING') ? 'PACKING' : (_isRefundMode(rawMode) ? 'REFUNDS' : (_isReturnMode(rawMode) ? 'RETURNS' : rawMode));
+                    const rrCloseKey = (_isRefundMode(rawMode) || _isReturnMode(rawMode)) ? _returnRefundCloseKey(r) : '';
+                    const rrCloseMeta = rrCloseKey ? _returnRefundCloseMeta(rrCloseKey) : null;
                     dataToExport.push({
                         Date: r.dateClean,
                         Start_Time: r.startTime || r.time,
@@ -1676,6 +1772,10 @@ document.addEventListener('click', (e) => {
                         All_Trackings: r.tracks || r.track || '',
                         Volumes: r.volumes || 1,
                         Items: r.prods,
+                        Closed_With: rrCloseMeta ? rrCloseMeta.label : '',
+                        Close_Status: rrCloseKey,
+                        Refund_Reason: r.refundReason || '',
+                        Special_With_Products: (r.specialCloseWithProducts === undefined ? '' : (r.specialCloseWithProducts ? 'YES' : 'NO')),
                         Carrier: carrier,
                         Batch_Key: r.batch || "GENERAL",
                         Batch_Name: (batches[r.batch] && batches[r.batch].name) ? batches[r.batch].name : "GENERAL"
@@ -1768,7 +1868,8 @@ document.addEventListener('click', (e) => {
             });
 
         } else if (type === 'RETURNS_PRODUCTS' || type === 'REFUNDS_PRODUCTS') {
-            // 1 row per product per day — Qty is the count for that specific day
+            // 1 row per product per day — Qty is the count for that specific day.
+            // REFUNDS closed with SWIPE / SEM PRODUTO are exported in a separate sheet.
             let snap;
             try {
                 snap = await db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value');
@@ -1779,16 +1880,51 @@ document.addEventListener('click', (e) => {
             }
             // dayProdMap: { 'YYYY-MM-DD': { product: qty } }
             const dayProdMap = {};
+            const specialRefundRows = [];
+
             Object.values(snap.val() || {}).forEach(r => {
                 if (!inRange(r.dateClean)) return;
                 const rawMode = (r.mode || '').toString().toUpperCase();
                 const matches = (type === 'RETURNS_PRODUCTS') ? _isReturnMode(rawMode) : _isRefundMode(rawMode);
                 if (!matches) return;
+
+                const closeKey = (_isRefundMode(rawMode) || _isReturnMode(rawMode)) ? _returnRefundCloseKey(r) : '';
+                const closeMeta = closeKey ? _returnRefundCloseMeta(closeKey) : null;
+                const isSpecialRefund = (type === 'REFUNDS_PRODUCTS') && _isRefundMode(rawMode) && (closeKey === 'SWIPE' || closeKey === 'NO_PRODUCT_DAMAGED');
+
                 const prodsStr = (r.prods || '').toString().trim();
-                if (!prodsStr || prodsStr === 'No Items') return;
+                let products = (!prodsStr || prodsStr === 'No Items') ? [] : prodsStr.split('|').map(x => x.trim()).filter(Boolean);
+
+                if (isSpecialRefund) {
+                    // Keep these out of the normal product-rank sheet and send them to their own sheet.
+                    if (!products.length) products = [closeMeta ? closeMeta.label : closeKey];
+                    const productCounts = {};
+                    products.forEach(prod => { productCounts[prod] = (productCounts[prod] || 0) + 1; });
+                    const parts = String(r.dateClean || '').split('-');
+                    const dateFmt = parts.length === 3 ? (parts[2] + '/' + parts[1] + '/' + parts[0]) : (r.dateClean || '');
+                    Object.entries(productCounts).forEach(([product, qty]) => {
+                        specialRefundRows.push({
+                            Date: dateFmt,
+                            Date_Raw: r.dateClean || '',
+                            Time: r.endTime || r.time || '',
+                            ID: r.id || '',
+                            User: r.user || '',
+                            Tracking: r.track || '',
+                            Closed_With: closeMeta ? closeMeta.label : closeKey,
+                            Close_Status: closeKey,
+                            Product: product,
+                            Qty: qty,
+                            Special_With_Products: (r.specialCloseWithProducts === undefined ? '' : (r.specialCloseWithProducts ? 'YES' : 'NO')),
+                            Refund_Reason: r.refundReason || ''
+                        });
+                    });
+                    return;
+                }
+
+                if (!products.length) return;
                 const dc = r.dateClean; // YYYY-MM-DD
                 if (!dayProdMap[dc]) dayProdMap[dc] = {};
-                prodsStr.split('|').map(x => x.trim()).filter(Boolean).forEach(prod => {
+                products.forEach(prod => {
                     dayProdMap[dc][prod] = (dayProdMap[dc][prod] || 0) + 1;
                 });
             });
@@ -1801,6 +1937,10 @@ document.addEventListener('click', (e) => {
                     dataToExport.push({ Date: dateFmt, Product: product, Qty: qty, Rank: i + 1 });
                 });
             });
+
+            if (type === 'REFUNDS_PRODUCTS') {
+                extraSheets.push({ name: 'Refunds_Especiais', rows: specialRefundRows });
+            }
         }
 
         // Build filename suffix with selected carriers (if filtered)
@@ -1809,11 +1949,19 @@ document.addEventListener('click', (e) => {
             carrierSuffix = '_' + [...selectedCarriers].join('-');
         }
 
-        if (dataToExport.length === 0) return uiAlert("No data found for these dates" + (selectedCarriers.size > 0 ? " and selected carriers." : "."));
+        const hasExtraData = extraSheets.some(s => s && Array.isArray(s.rows) && s.rows.length > 0);
+        if (dataToExport.length === 0 && !hasExtraData) return uiAlert("No data found for these dates" + (selectedCarriers.size > 0 ? " and selected carriers." : "."));
         try {
-            const ws = XLSX.utils.json_to_sheet(dataToExport);
             const wb = XLSX.utils.book_new();
+            const mainRows = dataToExport.length ? dataToExport : [{ Info: 'Sem dados na folha principal para este filtro.' }];
+            const ws = XLSX.utils.json_to_sheet(mainRows);
             XLSX.utils.book_append_sheet(wb, ws, "Report");
+            extraSheets.forEach(function(sheet){
+                if(!sheet || !Array.isArray(sheet.rows)) return;
+                const safeName = String(sheet.name || 'Extra').slice(0, 31);
+                const rows = sheet.rows.length ? sheet.rows : [{ Info: 'Sem dados.' }];
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), safeName);
+            });
             XLSX.writeFile(wb, `WH_Export_${type}${carrierSuffix}_${start}_to_${end}.xlsx`);
         } catch(e) {
             console.error('XLSX write error:', e);
@@ -2503,6 +2651,7 @@ function _parseIds(raw) {
             if (_fmt(ev.Carrier)) meta.push("<b>Carrier:</b> " + _fmt(ev.Carrier));
             if (_fmt(ev.User)) meta.push("<b>User:</b> " + _fmt(ev.User));
             if (_fmt(ev.Tracking)) meta.push("<b>Track:</b> " + _fmt(ev.Tracking));
+            if (_fmt(ev.Close_Label)) meta.push("<b>Fechado com:</b> " + _fmt(ev.Close_Label));
             if (_fmt(ev.Items_or_Content)) meta.push("<b>Items:</b> " + _fmt(ev.Items_or_Content));
             if (meta.length) html += "<div style='margin-top:8px; font-size:13px; line-height:1.35;'>" + meta.join(" &nbsp; | &nbsp; ") + "</div>";
             if (_fmt(ev.Details)) html += "<div style='margin-top:8px; font-size:12px; color:#444;'><small>" + _fmt(ev.Details) + "</small></div>";
@@ -2565,6 +2714,7 @@ function _parseIds(raw) {
             if (carrier) lines += "<div style='font-size:14px;'><b>Carrier:</b> " + carrier + "</div>";
             if (packedBy) lines += "<div style='font-size:14px;'><b>Packed by:</b> " + packedBy + "</div>";
             if (tracking) lines += "<div style='font-size:14px;'><b>Tracking:</b> " + tracking + "</div>";
+            if (s.lastReturnRefundClose) lines += "<div style='font-size:14px; margin-top:4px;'><b>Último RETURN/REFUND fechado com:</b> <span style='background:#f1f5f9; border:1px solid #cbd5e1; border-radius:8px; padding:3px 8px; font-weight:900;'>" + _fmt(s.lastReturnRefundClose) + "</span></div>";
             // Volumes + all tracks
             var volumes = s.volumes || 1;
             var tracks = _fmt(s.tracks || "");
@@ -2662,6 +2812,7 @@ function _parseIds(raw) {
             if (summary.cancelReason) parts.push("<b>Cancel reason:</b> " + _fmt(summary.cancelReason) + " (" + _fmt(summary.cancelBy) + " @ " + _fmt(summary.cancelAt) + ")");
             if (summary.packedBy) parts.push("<b>Packed by:</b> " + _fmt(summary.packedBy) + " @ " + _fmt(summary.packedAt));
             if (summary.tracking) parts.push("<b>Tracking:</b> " + _fmt(summary.tracking));
+            if (summary.lastReturnRefundClose) parts.push("<b>Último RETURN/REFUND fechado com:</b> " + _fmt(summary.lastReturnRefundClose));
             // Volumes
             var vols = summary.volumes || 1;
             if (vols > 1) {
@@ -2693,6 +2844,7 @@ function _parseIds(raw) {
             if (!tbody) return;
             var isPacking = _fmt(ev.Type) === "PACKING";
             var isCancelled = _fmt(ev.Type) === "CANCELLED";
+            var closeBadge = _fmt(ev.Close_Label) ? "<div style='margin-top:4px; display:inline-block; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:8px; padding:3px 7px; font-size:11px; font-weight:900; color:#334155;'>" + _fmt(ev.Close_Label) + "</div>" : "";
             var evVols = Number(ev.Volumes || 1);
             var evTracks = _fmt(ev.Tracks || ev.Tracking || "");
             var trackingCell = isPacking && evVols > 1
@@ -2703,7 +2855,7 @@ function _parseIds(raw) {
                 : (Number(ev.Volumes) > 1 ? `<span style='color:#92400e; font-weight:900;'>${Number(ev.Volumes)}</span>` : `<span style='color:#aaa;'>1</span>`);
             tbody.innerHTML += "<tr" + (isCancelled ? " style='background:#fff0f0; border-left:6px solid var(--error);'" : "") + ">"
                 + "<td>" + _fmt(ev.DateTime) + "</td>"
-                + "<td><b style='" + (isCancelled ? "color:var(--error);" : "") + "'>" + _fmt(ev.Type) + "</b></td>"
+                + "<td><b style='" + (isCancelled ? "color:var(--error);" : "") + "'>" + _fmt(ev.Type) + "</b>" + closeBadge + "</td>"
                 + "<td>" + _fmt(ev.Batch) + "</td>"
                 + "<td>" + _fmt(ev.Carrier) + "</td>"
                 + "<td>" + _fmt(ev.User) + "</td>"
@@ -2747,6 +2899,8 @@ function _parseIds(raw) {
                 row.Carrier = e.Carrier;
                 row.User = e.User;
                 row.Tracking = e.Tracking;
+                row.Close_Status = e.Close_Status || '';
+                row.Close_Label = e.Close_Label || '';
                 row.Items_or_Content = e.Items_or_Content;
                 row.Details = e.Details;
                 all.push(row);
@@ -2807,7 +2961,7 @@ function _parseIds(raw) {
         function _eventKey(ev){
             return [
                 _fmt(ev.Type), _fmt(ev.DateTime), _fmt(ev.Batch), _fmt(ev.Carrier),
-                _fmt(ev.User), _fmt(ev.Tracking), _fmt(ev.Items_or_Content), _fmt(ev.Details)
+                _fmt(ev.User), _fmt(ev.Tracking), _fmt(ev.Close_Status), _fmt(ev.Close_Label), _fmt(ev.Items_or_Content), _fmt(ev.Details)
             ].join("||");
         }
 
@@ -2940,6 +3094,8 @@ function _parseIds(raw) {
                     Tracking: _fmt(e.Tracking),
                     Items_or_Content: _fmt(e.Items_or_Content),
                     Details: _fmt(e.Details),
+                    Close_Status: _fmt(e.Close_Status || e.returnStatus || ''),
+                    Close_Label: _fmt(e.Close_Label || (e.returnStatus ? _returnRefundCloseMeta(e.returnStatus).label : '')),
                     Customer: _fmt(e.Customer || ""),
                     Expected_Content: _fmt(e.Items_or_Content || "")
                 };
@@ -2972,6 +3128,16 @@ function _parseIds(raw) {
                 var dt = _dtKey(r.dateClean, (r.endTime || r.time));
                 if (!_passesDate(dt, start, end)) return;
 
+                var closeKey = (type === "PACKING") ? '' : _returnRefundCloseKey(r);
+                var closeLabel = closeKey ? _returnRefundCloseMeta(closeKey).label : '';
+                var detailText = (type === "PACKING")
+                    ? ("Start: " + _fmt(r.startTime || r.time) + " | Confirm: " + _fmt(r.endTime || r.time))
+                    : ("Fechado com: " + closeLabel
+                        + (r.refundReason ? " | Motivo: " + _fmt(r.refundReason) : "")
+                        + (r.specialCloseWithProducts !== undefined ? (r.specialCloseWithProducts ? " | Especial com produto picado" : " | Especial sem produto picado") : "")
+                        + (r.prevProds ? " | Prev: " + _fmt(r.prevProds) : "")
+                        + (r.allProds ? " | Total combinado: " + _fmt(r.allProds) : ""));
+
                 var ev2 = {
                     ts: (function(){
                         try{ return new Date(r.dateClean + "T" + (r.endTime || r.time)).getTime(); }catch(_){ return 0; }
@@ -2986,9 +3152,9 @@ function _parseIds(raw) {
                     Tracks: _fmt(r.tracks || r.track),
                     Volumes: Number(r.volumes || 1),
                     Items_or_Content: _fmt(r.prods),
-                    Details: (type === "PACKING")
-                        ? ("Start: " + _fmt(r.startTime || r.time) + " | Confirm: " + _fmt(r.endTime || r.time))
-                        : (type === "REFUNDS" ? "Refund saved" : "Return saved")
+                    Close_Status: closeKey,
+                    Close_Label: closeLabel,
+                    Details: detailText
                 };
 
                 var k2 = _eventKey(ev2);
@@ -3157,6 +3323,13 @@ Object.entries(batchData).forEach(function(pair){
                     summary.tracking = _fmt(packEv.Tracking);
                     summary.tracks = _fmt(packEv.Tracks || packEv.Tracking);
                     summary.volumes = Number(packEv.Volumes || 1);
+                }
+
+                // latest return/refund closure button/status
+                var rrEv = _findLast(events, function(ev){ return (_fmt(ev.Type) === "RETURNS" || _fmt(ev.Type) === "REFUNDS") && (_fmt(ev.Close_Label) || _fmt(ev.Details)); });
+                if(rrEv){
+                    summary.lastReturnRefundType = _fmt(rrEv.Type);
+                    summary.lastReturnRefundClose = _fmt(rrEv.Close_Label) || _fmt(rrEv.Details).replace(/^Fechado com:\s*/,'').split('|')[0].trim();
                 }
 
                 // volumes defined in batch (even if not yet packed)
@@ -6263,8 +6436,30 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     return _fmt(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
+  function _returnRefundCloseKey(r){
+    var st = _fmt(r && r.returnStatus).toUpperCase().trim();
+    var reason = _fmt(r && r.refundReason).toUpperCase().trim();
+    var prods = _fmt(r && r.prods).toUpperCase().trim();
+    if(st === 'SWIPE' || reason === 'SWIPE' || prods === 'SWIPE') return 'SWIPE';
+    if(st === 'NO_PRODUCT_DAMAGED' || st === 'SEM PRODUTO/PRODUTO DANIFICADO' || reason === 'SEM PRODUTO/PRODUTO DANIFICADO' || prods === 'SEM PRODUTO/PRODUTO DANIFICADO') return 'NO_PRODUCT_DAMAGED';
+    if(st === 'INCOMPLETE') return 'INCOMPLETE';
+    return 'COMPLETE';
+  }
+
+  function _returnRefundCloseMeta(status){
+    var s = String(status || 'COMPLETE').toUpperCase();
+    if(s === 'INCOMPLETE') return {key:'INCOMPLETE', label:'Incompleto', plural:'Incompletos', icon:'&#x26A0;&#xFE0F;', color:'#f59e0b', bg:'#fff7ed', border:'#fed7aa'};
+    if(s === 'SWIPE') return {key:'SWIPE', label:'SWIPE', plural:'SWIPE', icon:'&#x21C4;', color:'#0ea5e9', bg:'#eff6ff', border:'#bfdbfe'};
+    if(s === 'NO_PRODUCT_DAMAGED') return {key:'NO_PRODUCT_DAMAGED', label:'Sem produto/produto danificado', plural:'Sem produto/produto danificado', icon:'&#x1F6AB;', color:'#475569', bg:'#f8fafc', border:'#cbd5e1'};
+    return {key:'COMPLETE', label:'Completo', plural:'Completos', icon:'&#x2705;', color:'#28a745', bg:'#f0fdf4', border:'#bbf7d0'};
+  }
+
   function _returnRefundStatus(r){
-    return (_fmt(r && r.returnStatus).toUpperCase() === 'INCOMPLETE') ? 'INCOMPLETE' : 'COMPLETE';
+    return _returnRefundCloseKey(r);
+  }
+
+  function _returnRefundCloseLabelFromRecord(r){
+    return _returnRefundCloseMeta(_returnRefundCloseKey(r)).label;
   }
 
   function _eventDateTime(r){
@@ -6275,15 +6470,10 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
   }
 
   function _perfStatusButton(type, status, count){
-    var isInc = status === 'INCOMPLETE';
-    var color = isInc ? '#f59e0b' : '#28a745';
-    var bg = isInc ? '#fff7ed' : '#f0fdf4';
-    var border = isInc ? '#fed7aa' : '#bbf7d0';
-    var icon = isInc ? '&#x26A0;&#xFE0F;' : '&#x2705;';
-    var label = isInc ? 'Incompletos' : 'Completos';
-    return '<button type="button" onclick="window.perfShowReturnRefundHistory(\''+type+'\',\''+status+'\')" '
-      + 'style="display:block; width:100%; text-align:left; margin-top:6px; padding:8px 10px; border-radius:10px; border:1.5px solid '+border+'; background:'+bg+'; color:'+color+'; cursor:pointer; font-weight:900; font-size:15px;">'
-      + icon + ' ' + label + ': <b>'+count+'</b> <span style="float:right; font-size:12px; color:#64748b; font-weight:900;">VER</span></button>';
+    var meta = _returnRefundCloseMeta(status);
+    return '<button type="button" onclick="window.perfShowReturnRefundHistory(\''+type+'\',\''+meta.key+'\')" '
+      + 'style="display:block; width:100%; text-align:left; margin-top:6px; padding:8px 10px; border-radius:10px; border:1.5px solid '+meta.border+'; background:'+meta.bg+'; color:'+meta.color+'; cursor:pointer; font-weight:900; font-size:15px;">'
+      + meta.icon + ' ' + meta.plural + ': <b>'+count+'</b> <span style="float:right; font-size:12px; color:#64748b; font-weight:900;">VER</span></button>';
   }
 
   function _returnRefundRecordsForStatus(type, status, regList, operatorUpper){
@@ -6510,12 +6700,13 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
   }
 
   function _buildReturnRefundStatusHistory(type, status, dateClean, regList, operatorUpper, packingRecordsById){
-    var statusLabel = (status === 'INCOMPLETE') ? 'Incompletos' : 'Completos';
-    var filtered = _returnRefundRecordsForStatus(type, status, regList, operatorUpper);
+    var meta = _returnRefundCloseMeta(status);
+    var statusLabel = meta.plural;
+    var filtered = _returnRefundRecordsForStatus(type, meta.key, regList, operatorUpper);
 
     var opTxt = (operatorUpper && operatorUpper !== 'ALL') ? (' | Operador: ' + operatorUpper) : ' | Operador: Todos';
     if(!filtered.length){
-      return '<div class="card" style="border-left:5px solid '+(status === 'INCOMPLETE' ? '#f59e0b' : '#28a745')+';">'
+      return '<div class="card" style="border-left:5px solid '+meta.color+'; max-width:100%; overflow:visible;">'
         + '<b>'+_htmlEsc(type)+' '+_htmlEsc(statusLabel)+'</b>'
         + '<div style="font-size:13px; color:#666; margin-top:6px;">Dia: <b>'+_htmlEsc(dateClean)+'</b>'+_htmlEsc(opTxt)+'</div>'
         + '<div style="margin-top:12px; color:#666;">Sem histórico para este filtro.</div>'
@@ -6523,54 +6714,58 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     }
 
     var totalProducts = filtered.reduce(function(acc,r){ return acc + _countProducts(r.allProds || r.prods); }, 0);
-    var html = '<div class="card" style="border-left:5px solid '+(status === 'INCOMPLETE' ? '#f59e0b' : '#28a745')+';">';
+    var html = '<div class="card" style="border-left:5px solid '+meta.color+'; max-width:100%; overflow:visible; box-sizing:border-box;">';
     html += '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">';
     html += '<div><b>'+_htmlEsc(type)+' '+_htmlEsc(statusLabel)+'</b>';
     html += '<div style="font-size:13px; color:#666; margin-top:4px;">Dia: <b>'+_htmlEsc(dateClean)+'</b>'+_htmlEsc(opTxt)+'</div></div>';
-    html += '<div style="font-size:13px; color:#334155; font-weight:900;">IDs: '+filtered.length+' | Produtos picados: '+totalProducts+'</div>';
+    html += '<div style="font-size:13px; color:#334155; font-weight:900; white-space:normal; overflow-wrap:anywhere;">IDs: '+filtered.length+' | Produtos picados: '+totalProducts+'</div>';
     html += '</div>';
     html += '<div style="font-size:12px; color:#64748b; margin-top:8px;">A comparação ignora warranties na diferença, mas mostra tudo em Embalado/Picado.</div>';
-    html += '<div style="overflow:auto; margin-top:12px; max-height:520px; border:1px solid #e5e7eb; border-radius:12px;">';
-    html += '<table style="width:100%; border-collapse:collapse;">';
-    html += '<thead><tr style="text-align:left;">'
-      + '<th style="padding:8px; border-bottom:1px solid #eee; white-space:nowrap;">Data/Hora '+_htmlEsc(type)+'</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee;">ID</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee; white-space:nowrap;">Operador '+_htmlEsc(type)+'</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee;">Tracking '+_htmlEsc(type)+'</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:220px;">Embalado</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:220px;">Picado '+_htmlEsc(type)+'</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee; min-width:180px;">Diferença</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee;">Estado</th>'
-      + '<th style="padding:8px; border-bottom:1px solid #eee;">Detalhes</th>'
-      + '</tr></thead><tbody>';
+    html += '<div class="perf-rr-simple-list">';
 
     filtered.forEach(function(r){
       var compare = _buildCompareBlock(r, packingRecordsById || {});
       var productsArr = _returnRefundProductsForCompare(r);
-      var stateBadge = status === 'INCOMPLETE'
-        ? '<span style="background:#fff7ed; color:#b45309; border:1px solid #fed7aa; padding:4px 8px; border-radius:8px; font-weight:900;">INCOMPLETO</span>'
-        : '<span style="background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; padding:4px 8px; border-radius:8px; font-weight:900;">COMPLETO</span>';
+      var rowMeta = _returnRefundCloseMeta(_returnRefundCloseKey(r));
+      var stateBadge = '<span style="display:inline-block; background:'+rowMeta.bg+'; color:'+rowMeta.color+'; border:1px solid '+rowMeta.border+'; padding:7px 10px; border-radius:10px; font-weight:900; white-space:normal; max-width:100%; overflow-wrap:anywhere;">'+rowMeta.icon+' '+_htmlEsc(rowMeta.label.toUpperCase())+'</span>';
       var details = [];
+      details.push('Fechado com: ' + rowMeta.label);
+      if(r.refundReason) details.push('Motivo: ' + _fmt(r.refundReason));
+      if(r.specialCloseWithProducts !== undefined) details.push(r.specialCloseWithProducts ? 'Especial com produto picado' : 'Especial sem produto picado');
       if(r.batch) details.push('Batch: ' + _fmt(r.batch));
       if(r.startTime) details.push('Start: ' + _fmt(r.startTime));
       if(r.endTime || r.time) details.push('End: ' + _fmt(r.endTime || r.time));
       if(r.prevProds) details.push('Prev: ' + _fmt(r.prevProds));
       if(r.allProds) details.push('Total combinado: ' + _fmt(r.allProds));
       if(compare.packDetails) details.push(compare.packDetails);
-      html += '<tr style="vertical-align:top;'+(status === 'INCOMPLETE' ? ' background:#fffaf0;' : '')+'">'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; white-space:nowrap;">'+_htmlEsc(_eventDateTime(r))+'</td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-weight:900;">'+_htmlEsc(r.id)+'</td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6;">'+_htmlEsc(_upperUser(r.user))+'</td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6;">'+_htmlEsc(r.tracks || r.track)+'</td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; line-height:1.45;">'+compare.packedHtml+'</td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; line-height:1.45;">'+compare.returnedHtml+'<div style="margin-top:6px; color:#64748b; font-weight:900;">Qtd: '+productsArr.length+'</div></td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; line-height:1.45;">'+compare.diffHtml+'</td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6;">'+stateBadge+'</td>'
-        + '<td style="padding:8px; border-bottom:1px solid #f3f4f6; font-size:12px; color:#555; min-width:220px;">'+_htmlEsc(details.join(' | '))+'</td>'
-        + '</tr>';
+      var detailsHtml = details.map(function(d){
+        var s = _fmt(d);
+        var idx = s.indexOf(':');
+        if(idx > 0){
+          return '<div class="perf-detail-line"><span class="perf-detail-label">'+_htmlEsc(s.slice(0, idx + 1))+'</span> '+_htmlEsc(s.slice(idx + 1).trim())+'</div>';
+        }
+        return '<div class="perf-detail-line">'+_htmlEsc(s)+'</div>';
+      }).join('');
+
+      html += '<div class="perf-rr-simple-card '+(rowMeta.key === 'INCOMPLETE' ? 'perf-rr-simple-card--warn' : '')+'">';
+      html += '<div class="perf-rr-simple-head">'
+        + '<div style="min-width:0; flex:1 1 320px;">'
+        + '<div class="perf-rr-simple-title">ID '+_htmlEsc(r.id)+' | '+_htmlEsc(_eventDateTime(r))+'</div>'
+        + '<div class="perf-rr-simple-meta">Operador '+_htmlEsc(type)+': <b>'+_htmlEsc(_upperUser(r.user))+'</b></div>'
+        + '<div class="perf-rr-simple-meta">Tracking '+_htmlEsc(type)+': '+_htmlEsc(r.tracks || r.track || '—')+'</div>'
+        + '</div>'
+        + '<div style="flex:0 1 auto; max-width:100%; margin-top:2px;">'+stateBadge+'</div>'
+        + '</div>';
+      html += '<div class="perf-rr-simple-cols">'
+        + '<div class="perf-rr-simple-box"><span class="perf-rr-simple-label">Embalado</span>'+compare.packedHtml+'</div>'
+        + '<div class="perf-rr-simple-box"><span class="perf-rr-simple-label">Picado '+_htmlEsc(type)+'</span>'+compare.returnedHtml+'<div style="margin-top:7px; color:#64748b; font-weight:900;">Qtd: '+productsArr.length+'</div></div>'
+        + '</div>';
+      html += '<div class="perf-rr-simple-diff"><span class="perf-rr-simple-label">Diferença</span>'+compare.diffHtml+'</div>';
+      html += '<div class="perf-rr-simple-details"><span class="perf-detail-label">Detalhes:</span>'+detailsHtml+'</div>';
+      html += '</div>';
     });
 
-    html += '</tbody></table></div></div>';
+    html += '</div></div>';
     return html;
   }
 
@@ -6591,7 +6786,12 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     try{
       var packingMap = await _loadPackingComparisonMap(records);
       list.innerHTML = _buildReturnRefundStatusHistory(t, s, state.day, state.regList, operator, packingMap);
-      try { list.scrollIntoView({behavior:'smooth', block:'start'}); } catch(_e) {}
+      try { document.documentElement.scrollLeft = 0; document.body.scrollLeft = 0; window.scrollTo({ left: 0, top: window.pageYOffset }); } catch(_e0) {}
+      try {
+        var perfTop = (wrap ? wrap.getBoundingClientRect().top : list.getBoundingClientRect().top) + window.pageYOffset - 90;
+        window.scrollTo({ top: Math.max(0, perfTop), left: 0, behavior: 'smooth' });
+      } catch(_e) {}
+      try { window.setTimeout(function(){ document.documentElement.scrollLeft = 0; document.body.scrollLeft = 0; window.scrollTo({ left:0, top: window.pageYOffset }); }, 180); } catch(_e2) {}
     }catch(e){
       console.error('Performance comparison history error:', e);
       list.innerHTML = _buildReturnRefundStatusHistory(t, s, state.day, state.regList, operator, {});
@@ -6647,10 +6847,12 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var totalReturnIds = returns.length;
     var totalRefundIds = refunds.length;
 
-    var totalReturnComplete   = returns.filter(function(r){ return (r.returnStatus || '').toUpperCase() !== 'INCOMPLETE'; }).length;
-    var totalReturnIncomplete = returns.filter(function(r){ return (r.returnStatus || '').toUpperCase() === 'INCOMPLETE'; }).length;
-    var totalRefundComplete   = refunds.filter(function(r){ return (r.returnStatus || '').toUpperCase() !== 'INCOMPLETE'; }).length;
-    var totalRefundIncomplete = refunds.filter(function(r){ return (r.returnStatus || '').toUpperCase() === 'INCOMPLETE'; }).length;
+    var totalReturnComplete   = returns.filter(function(r){ return _returnRefundCloseKey(r) === 'COMPLETE'; }).length;
+    var totalReturnIncomplete = returns.filter(function(r){ return _returnRefundCloseKey(r) === 'INCOMPLETE'; }).length;
+    var totalRefundComplete   = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'COMPLETE'; }).length;
+    var totalRefundIncomplete = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'INCOMPLETE'; }).length;
+    var totalRefundSwipe = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'SWIPE'; }).length;
+    var totalRefundNoProductDamaged = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'NO_PRODUCT_DAMAGED'; }).length;
 
     var totalPackedProducts = packed.reduce(function(acc,r){ return acc + _countProducts(r.prods); }, 0);
     var totalReturnProducts = returns.reduce(function(acc,r){ return acc + _countProducts(r.prods); }, 0);
@@ -6708,7 +6910,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     html += '<div class="grid-2" style="margin-top:10px;">';
     html += '  <div class="card"><b>PACKING (dia)</b><div style="margin-top:8px;">IDs embalados: <b>'+totalPackedIds+'</b><br>Produtos embalados: <b>'+totalPackedProducts+'</b></div></div>';
     html += '  <div class="card"><b>RETURNS (dia)</b><div style="margin-top:8px;">IDs returns: <b>'+totalReturnIds+'</b><br>Produtos returns: <b>'+totalReturnProducts+'</b>' + _perfStatusButton('RETURNS','COMPLETE',totalReturnComplete) + _perfStatusButton('RETURNS','INCOMPLETE',totalReturnIncomplete) + '</div></div>';
-    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b>' + _perfStatusButton('REFUNDS','COMPLETE',totalRefundComplete) + _perfStatusButton('REFUNDS','INCOMPLETE',totalRefundIncomplete) + '</div></div>';
+    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b>' + _perfStatusButton('REFUNDS','COMPLETE',totalRefundComplete) + _perfStatusButton('REFUNDS','INCOMPLETE',totalRefundIncomplete) + _perfStatusButton('REFUNDS','SWIPE',totalRefundSwipe) + _perfStatusButton('REFUNDS','NO_PRODUCT_DAMAGED',totalRefundNoProductDamaged) + '</div></div>';
     html += '</div>';
 
     html += '<div class="card" style="margin-top:10px;"><b>PRE-PACKING (dia)</b><div style="margin-top:8px;">Registos pre-packing: <b>'+totalPrepackIds+'</b><br>Produtos em pre-packing: <b>'+totalPrepackProducts+'</b></div></div>';
@@ -6773,14 +6975,18 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
       if(!r) return;
       var mode = r.mode || '';
       if(mode !== 'PACKING' && !_isReturnMode(mode) && !_isRefundMode(mode)) return;
+      var eventType = (mode==='PACKING' ? 'PACKING' : (_isRefundMode(mode) ? 'REFUNDS' : 'RETURNS'));
+      var closeMeta = (eventType === 'PACKING') ? null : _returnRefundCloseMeta(_returnRefundCloseKey(r));
+      var extra = 'Batch: ' + _fmt(r.batch) + ' | Start: ' + _fmt(r.startTime) + ' | End: ' + _fmt(r.endTime);
+      if(closeMeta) extra = 'Fechado com: ' + closeMeta.label + ' | ' + extra;
       events.push({
         ts: r.ts ? r.ts : (r.timeIso ? Date.parse(r.timeIso) : 0),
-        type: (mode==='PACKING' ? 'PACKING' : (_isRefundMode(mode) ? 'REFUNDS' : 'RETURNS')),
+        type: eventType,
         id: _fmt(r.id),
         user: _upperUser(r.user),
         track: _fmt(r.track),
         prods: (_splitProductsField(r.prods).join(' | ') || _fmt(r.prods)),
-        extra: 'Batch: ' + _fmt(r.batch) + ' | Start: ' + _fmt(r.startTime) + ' | End: ' + _fmt(r.endTime)
+        extra: extra
       });
     });
 
