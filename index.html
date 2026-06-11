@@ -117,7 +117,7 @@
         .batch-card-header { display:flex; justify-content:space-between; font-size:12px; color:#666; gap:10px; }
         .batch-picked-meta { margin-top:6px; font-size:12px; color:#444; }
         .batch-picked-at { color:#666; }
-        .batch-action-row { display:flex; gap:10px; margin-top:15px; }
+        .batch-action-row { display:flex; gap:10px; margin-top:15px; flex-wrap:wrap; }
         .btn-accent-fill { background:var(--accent); flex:1; }
 
         .app-toast-region {
@@ -1682,21 +1682,16 @@ document.addEventListener('click', (e) => {
         var st = (r && r.returnStatus !== undefined && r.returnStatus !== null) ? String(r.returnStatus).toUpperCase().trim() : '';
         var reason = (r && r.refundReason !== undefined && r.refundReason !== null) ? String(r.refundReason).toUpperCase().trim() : '';
         var prods = (r && r.prods !== undefined && r.prods !== null) ? String(r.prods).toUpperCase().trim() : '';
+        function hasAny(values){
+            return values.some(function(v){ return st === v || reason === v || prods === v; });
+        }
 
-        if(st === 'SWIPE' || reason === 'SWIPE' || prods === 'SWIPE') return 'SWIPE';
-
-        if(
-            st === 'NO_PRODUCT_DAMAGED' ||
-            st === 'NO PRODUCT DAMAGED' ||
-            st === 'SEM PRODUTO/PRODUTO DANIFICADO' ||
-            reason === 'NO_PRODUCT_DAMAGED' ||
-            reason === 'NO PRODUCT DAMAGED' ||
-            reason === 'SEM PRODUTO/PRODUTO DANIFICADO' ||
-            prods === 'NO_PRODUCT_DAMAGED' ||
-            prods === 'NO PRODUCT DAMAGED' ||
-            prods === 'SEM PRODUTO/PRODUTO DANIFICADO'
-        ) return 'NO_PRODUCT_DAMAGED';
-
+        if(hasAny(['SWIPE'])) return 'SWIPE';
+        if(hasAny(['NO_PRODUCT', 'NO PRODUCT', 'SEM PRODUTO'])) return 'NO_PRODUCT';
+        if(hasAny(['PRODUCT_DAMAGED', 'PRODUCT DAMAGED', 'PRODUTO DANIFICADO'])) return 'PRODUCT_DAMAGED';
+        if(hasAny(['BOX_DAMAGED', 'BOX DAMAGED', 'CAIXA DANIFICADA'])) return 'BOX_DAMAGED';
+        // Legacy value used before the 3 special buttons were split.
+        if(hasAny(['NO_PRODUCT_DAMAGED', 'NO PRODUCT DAMAGED', 'SEM PRODUTO/PRODUTO DANIFICADO'])) return 'NO_PRODUCT_DAMAGED';
         if(st === 'INCOMPLETE' || st === 'INCOMPLETO') return 'INCOMPLETE';
         return 'COMPLETE';
     }
@@ -1708,6 +1703,15 @@ document.addEventListener('click', (e) => {
         }
         if(s === 'SWIPE') {
             return { key:'SWIPE', label:'SWIPE', plural:'SWIPE', icon:'⇄', color:'#0ea5e9', bg:'#eff6ff', border:'#bfdbfe' };
+        }
+        if(s === 'NO_PRODUCT' || s === 'NO PRODUCT' || s === 'SEM PRODUTO') {
+            return { key:'NO_PRODUCT', label:'Sem produto', plural:'Sem produto', icon:'🚫', color:'#475569', bg:'#f8fafc', border:'#cbd5e1' };
+        }
+        if(s === 'PRODUCT_DAMAGED' || s === 'PRODUCT DAMAGED' || s === 'PRODUTO DANIFICADO') {
+            return { key:'PRODUCT_DAMAGED', label:'Produto danificado', plural:'Produto danificado', icon:'🛠️', color:'#7f1d1d', bg:'#fef2f2', border:'#fecaca' };
+        }
+        if(s === 'BOX_DAMAGED' || s === 'BOX DAMAGED' || s === 'CAIXA DANIFICADA') {
+            return { key:'BOX_DAMAGED', label:'Caixa danificada', plural:'Caixa danificada', icon:'📦', color:'#92400e', bg:'#fffbeb', border:'#fed7aa' };
         }
         if(s === 'NO_PRODUCT_DAMAGED' || s === 'NO PRODUCT DAMAGED' || s === 'SEM PRODUTO/PRODUTO DANIFICADO') {
             return { key:'NO_PRODUCT_DAMAGED', label:'Sem produto/produto danificado', plural:'Sem produto/produto danificado', icon:'🚫', color:'#475569', bg:'#f8fafc', border:'#cbd5e1' };
@@ -1869,7 +1873,7 @@ document.addEventListener('click', (e) => {
 
         } else if (type === 'RETURNS_PRODUCTS' || type === 'REFUNDS_PRODUCTS') {
             // 1 row per product per day — Qty is the count for that specific day.
-            // REFUNDS closed with SWIPE / SEM PRODUTO are exported in a separate sheet.
+            // REFUNDS closed with special buttons (SWIPE / SEM PRODUTO / PRODUTO DANIFICADO / CAIXA DANIFICADA) are exported in a separate sheet.
             let snap;
             try {
                 snap = await db.ref('registos').orderByChild('dateClean').startAt(start).endAt(end).once('value');
@@ -1890,7 +1894,7 @@ document.addEventListener('click', (e) => {
 
                 const closeKey = (_isRefundMode(rawMode) || _isReturnMode(rawMode)) ? _returnRefundCloseKey(r) : '';
                 const closeMeta = closeKey ? _returnRefundCloseMeta(closeKey) : null;
-                const isSpecialRefund = (type === 'REFUNDS_PRODUCTS') && _isRefundMode(rawMode) && (closeKey === 'SWIPE' || closeKey === 'NO_PRODUCT_DAMAGED');
+                const isSpecialRefund = (type === 'REFUNDS_PRODUCTS') && _isRefundMode(rawMode) && ['SWIPE','NO_PRODUCT','PRODUCT_DAMAGED','BOX_DAMAGED','NO_PRODUCT_DAMAGED'].indexOf(closeKey) !== -1;
 
                 const prodsStr = (r.prods || '').toString().trim();
                 let products = (!prodsStr || prodsStr === 'No Items') ? [] : prodsStr.split('|').map(x => x.trim()).filter(Boolean);
@@ -4314,6 +4318,7 @@ Missing: ${sample}${more}`);
                 <div class="batch-action-row">
                     <button class="btn-small btn-accent-fill" onclick="openEditModal('${_escapeHtml(batchId)}', false)">EDIT</button>
                     <button class="btn-small" style="background:var(--picking);" onclick="printPickingFromBatchCard('${_escapeHtml(batchId)}')">🖨️ PICKING</button>
+                    ${st !== 'COMPLETED' ? `<button class="btn-small" style="background:#16a34a;" onclick="forceBatchCompletedFromOverview('${_escapeHtml(batchId)}')">✅ COMPLETED</button>` : ''}
                     <button class="btn-small btn-delete" onclick="deleteBatch('${_escapeHtml(batchId)}')">DEL</button>
                 </div>
             </div>`;
@@ -5205,6 +5210,57 @@ function showMetadata(id) {
             console.error(err);
             uiAlert("Erro ao apagar lote.");
         });
+    }
+
+
+    async function forceBatchCompletedFromOverview(id) {
+        if(!id) return;
+        if(!(currentUser && currentUser.email && currentUser.email.endsWith('@admin.com'))){
+            return uiAlert('Sem permissões para forçar lote como COMPLETED.');
+        }
+
+        let snap;
+        try {
+            snap = await db.ref('active_batches/' + id).once('value');
+        } catch(err) {
+            console.error('forceBatchCompletedFromOverview read error:', err);
+            return uiAlert('Erro ao carregar lote.');
+        }
+
+        const batch = snap.val();
+        if(!batch) return uiAlert('Lote não encontrado em active_batches.');
+        const currentStatus = String(batch.status || '').toUpperCase();
+        if(currentStatus === 'COMPLETED') return uiAlert('Este lote já está COMPLETED.', { type:'success' });
+
+        const stats = _getBatchProgressInfo(batch);
+        const missing = Math.max(0, Number((stats && stats.pending) || 0));
+        const name = batch.name || id;
+        const msg = 'Tens a certeza que queres forçar este lote para COMPLETED?\n\n'
+            + 'Lote: ' + name + '\n'
+            + 'Status atual: ' + (batch.status || 'N/A') + '\n'
+            + 'IDs pendentes: ' + missing + '\n\n'
+            + 'Isto NÃO marca IDs em falta como embalados; só muda o status do lote para COMPLETED.';
+
+        if(!await uiConfirm(msg, { title:'Forçar lote COMPLETED', okText:'SIM, FORÇAR COMPLETED', cancelText:'CANCELAR' })) return;
+
+        const user = (currentUser && currentUser.email) ? currentUser.email : 'UNKNOWN';
+        const update = {
+            status: 'COMPLETED',
+            forcedCompleted: true,
+            forcedCompletedBy: user,
+            forcedCompletedAt: _nowDateTime(),
+            forcedCompletedTs: _serverTs()
+        };
+
+        try {
+            await db.ref('active_batches/' + id).update(update);
+            await logBatchAction(id, 'LOTE FORÇADO PARA COMPLETED via Warehouse Overview por ' + user);
+            try { syncGlobalData(); } catch(e) {}
+            uiAlert('Lote marcado como COMPLETED.', { type:'success' });
+        } catch(err) {
+            console.error('forceBatchCompletedFromOverview update error:', err);
+            uiAlert('Erro ao forçar lote como COMPLETED.');
+        }
     }
 
     // Delete ENTIRE batch from the Batch Details modal
@@ -6488,22 +6544,45 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
   }
 
   function _returnRefundCloseKey(r){
-    var st = _fmt(r && r.returnStatus).toUpperCase().trim();
-    var reason = _fmt(r && r.refundReason).toUpperCase().trim();
-    var prods = _fmt(r && r.prods).toUpperCase().trim();
-    if(st === 'SWIPE' || reason === 'SWIPE' || prods === 'SWIPE') return 'SWIPE';
-    if(st === 'NO_PRODUCT_DAMAGED' || st === 'SEM PRODUTO/PRODUTO DANIFICADO' || reason === 'SEM PRODUTO/PRODUTO DANIFICADO' || prods === 'SEM PRODUTO/PRODUTO DANIFICADO') return 'NO_PRODUCT_DAMAGED';
-    if(st === 'INCOMPLETE') return 'INCOMPLETE';
-    return 'COMPLETE';
-  }
+        var st = (r && r.returnStatus !== undefined && r.returnStatus !== null) ? String(r.returnStatus).toUpperCase().trim() : '';
+        var reason = (r && r.refundReason !== undefined && r.refundReason !== null) ? String(r.refundReason).toUpperCase().trim() : '';
+        var prods = (r && r.prods !== undefined && r.prods !== null) ? String(r.prods).toUpperCase().trim() : '';
+        function hasAny(values){
+            return values.some(function(v){ return st === v || reason === v || prods === v; });
+        }
+
+        if(hasAny(['SWIPE'])) return 'SWIPE';
+        if(hasAny(['NO_PRODUCT', 'NO PRODUCT', 'SEM PRODUTO'])) return 'NO_PRODUCT';
+        if(hasAny(['PRODUCT_DAMAGED', 'PRODUCT DAMAGED', 'PRODUTO DANIFICADO'])) return 'PRODUCT_DAMAGED';
+        if(hasAny(['BOX_DAMAGED', 'BOX DAMAGED', 'CAIXA DANIFICADA'])) return 'BOX_DAMAGED';
+        // Legacy value used before the 3 special buttons were split.
+        if(hasAny(['NO_PRODUCT_DAMAGED', 'NO PRODUCT DAMAGED', 'SEM PRODUTO/PRODUTO DANIFICADO'])) return 'NO_PRODUCT_DAMAGED';
+        if(st === 'INCOMPLETE' || st === 'INCOMPLETO') return 'INCOMPLETE';
+        return 'COMPLETE';
+    }
 
   function _returnRefundCloseMeta(status){
-    var s = String(status || 'COMPLETE').toUpperCase();
-    if(s === 'INCOMPLETE') return {key:'INCOMPLETE', label:'Incompleto', plural:'Incompletos', icon:'&#x26A0;&#xFE0F;', color:'#f59e0b', bg:'#fff7ed', border:'#fed7aa'};
-    if(s === 'SWIPE') return {key:'SWIPE', label:'SWIPE', plural:'SWIPE', icon:'&#x21C4;', color:'#0ea5e9', bg:'#eff6ff', border:'#bfdbfe'};
-    if(s === 'NO_PRODUCT_DAMAGED') return {key:'NO_PRODUCT_DAMAGED', label:'Sem produto/produto danificado', plural:'Sem produto/produto danificado', icon:'&#x1F6AB;', color:'#475569', bg:'#f8fafc', border:'#cbd5e1'};
-    return {key:'COMPLETE', label:'Completo', plural:'Completos', icon:'&#x2705;', color:'#28a745', bg:'#f0fdf4', border:'#bbf7d0'};
-  }
+        var s = String(status || 'COMPLETE').toUpperCase().trim();
+        if(s === 'INCOMPLETE' || s === 'INCOMPLETO') {
+            return { key:'INCOMPLETE', label:'Incompleto', plural:'Incompletos', icon:'⚠️', color:'#f59e0b', bg:'#fff7ed', border:'#fed7aa' };
+        }
+        if(s === 'SWIPE') {
+            return { key:'SWIPE', label:'SWIPE', plural:'SWIPE', icon:'⇄', color:'#0ea5e9', bg:'#eff6ff', border:'#bfdbfe' };
+        }
+        if(s === 'NO_PRODUCT' || s === 'NO PRODUCT' || s === 'SEM PRODUTO') {
+            return { key:'NO_PRODUCT', label:'Sem produto', plural:'Sem produto', icon:'🚫', color:'#475569', bg:'#f8fafc', border:'#cbd5e1' };
+        }
+        if(s === 'PRODUCT_DAMAGED' || s === 'PRODUCT DAMAGED' || s === 'PRODUTO DANIFICADO') {
+            return { key:'PRODUCT_DAMAGED', label:'Produto danificado', plural:'Produto danificado', icon:'🛠️', color:'#7f1d1d', bg:'#fef2f2', border:'#fecaca' };
+        }
+        if(s === 'BOX_DAMAGED' || s === 'BOX DAMAGED' || s === 'CAIXA DANIFICADA') {
+            return { key:'BOX_DAMAGED', label:'Caixa danificada', plural:'Caixa danificada', icon:'📦', color:'#92400e', bg:'#fffbeb', border:'#fed7aa' };
+        }
+        if(s === 'NO_PRODUCT_DAMAGED' || s === 'NO PRODUCT DAMAGED' || s === 'SEM PRODUTO/PRODUTO DANIFICADO') {
+            return { key:'NO_PRODUCT_DAMAGED', label:'Sem produto/produto danificado', plural:'Sem produto/produto danificado', icon:'🚫', color:'#475569', bg:'#f8fafc', border:'#cbd5e1' };
+        }
+        return { key:'COMPLETE', label:'Completo', plural:'Completos', icon:'✅', color:'#28a745', bg:'#f0fdf4', border:'#bbf7d0' };
+    }
 
   function _returnRefundStatus(r){
     return _returnRefundCloseKey(r);
@@ -6903,6 +6982,9 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var totalRefundComplete   = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'COMPLETE'; }).length;
     var totalRefundIncomplete = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'INCOMPLETE'; }).length;
     var totalRefundSwipe = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'SWIPE'; }).length;
+    var totalRefundNoProduct = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'NO_PRODUCT'; }).length;
+    var totalRefundProductDamaged = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'PRODUCT_DAMAGED'; }).length;
+    var totalRefundBoxDamaged = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'BOX_DAMAGED'; }).length;
     var totalRefundNoProductDamaged = refunds.filter(function(r){ return _returnRefundCloseKey(r) === 'NO_PRODUCT_DAMAGED'; }).length;
 
     var totalPackedProducts = packed.reduce(function(acc,r){ return acc + _countProducts(r.prods); }, 0);
@@ -6961,7 +7043,7 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     html += '<div class="grid-2" style="margin-top:10px;">';
     html += '  <div class="card"><b>PACKING (dia)</b><div style="margin-top:8px;">IDs embalados: <b>'+totalPackedIds+'</b><br>Produtos embalados: <b>'+totalPackedProducts+'</b></div></div>';
     html += '  <div class="card"><b>RETURNS (dia)</b><div style="margin-top:8px;">IDs returns: <b>'+totalReturnIds+'</b><br>Produtos returns: <b>'+totalReturnProducts+'</b>' + _perfStatusButton('RETURNS','COMPLETE',totalReturnComplete) + _perfStatusButton('RETURNS','INCOMPLETE',totalReturnIncomplete) + '</div></div>';
-    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b>' + _perfStatusButton('REFUNDS','COMPLETE',totalRefundComplete) + _perfStatusButton('REFUNDS','INCOMPLETE',totalRefundIncomplete) + _perfStatusButton('REFUNDS','SWIPE',totalRefundSwipe) + _perfStatusButton('REFUNDS','NO_PRODUCT_DAMAGED',totalRefundNoProductDamaged) + '</div></div>';
+    html += '  <div class="card"><b>REFUNDS (dia)</b><div style="margin-top:8px;">IDs refunds: <b>'+totalRefundIds+'</b><br>Produtos refunds: <b>'+totalRefundProducts+'</b>' + _perfStatusButton('REFUNDS','COMPLETE',totalRefundComplete) + _perfStatusButton('REFUNDS','INCOMPLETE',totalRefundIncomplete) + _perfStatusButton('REFUNDS','SWIPE',totalRefundSwipe) + _perfStatusButton('REFUNDS','NO_PRODUCT',totalRefundNoProduct) + _perfStatusButton('REFUNDS','PRODUCT_DAMAGED',totalRefundProductDamaged) + _perfStatusButton('REFUNDS','BOX_DAMAGED',totalRefundBoxDamaged) + _perfStatusButton('REFUNDS','NO_PRODUCT_DAMAGED',totalRefundNoProductDamaged) + '</div></div>';
     html += '</div>';
 
     html += '<div class="card" style="margin-top:10px;"><b>PRE-PACKING (dia)</b><div style="margin-top:8px;">Registos pre-packing: <b>'+totalPrepackIds+'</b><br>Produtos em pre-packing: <b>'+totalPrepackProducts+'</b></div></div>';
@@ -7138,19 +7220,22 @@ function handlePrePack(v) { const key = safeKey(v); const prodName = masterProdu
     var ppF  = _applyOperatorFilter(state.ppList, operator);
 
     var rows = [];
-    rows.push(["date","type","id","operator","tracking","products","extra"]);
+    rows.push(["date","type","id","operator","tracking","products","closed_with","close_status","refund_reason","extra"]);
 
     regF.forEach(function(r){
       if(!r) return;
       var mode = r.mode || '';
       if(mode !== 'PACKING' && !_isReturnMode(mode) && !_isRefundMode(mode)) return;
-      rows.push([state.day, (mode==='PACKING'?'PACKING':'RETURNS'), _fmt(r.id), _upperUser(r.user), _fmt(r.track), _fmt(r.prods),
+      var eventType = (mode === 'PACKING') ? 'PACKING' : (_isRefundMode(mode) ? 'REFUNDS' : 'RETURNS');
+      var closeKey = (eventType === 'PACKING') ? '' : _returnRefundCloseKey(r);
+      var closeLabel = closeKey ? _returnRefundCloseMeta(closeKey).label : '';
+      rows.push([state.day, eventType, _fmt(r.id), _upperUser(r.user), _fmt(r.track), _fmt(r.prods), closeLabel, closeKey, _fmt(r.refundReason || ''),
         "batch="+_fmt(r.batch)+" start="+_fmt(r.startTime)+" end="+_fmt(r.endTime)]);
     });
 
     ppF.forEach(function(p){
       if(!p) return;
-      rows.push([state.day, "PRE-PACKING", _prepackOrderId(p), _upperUser(p.user || p.operator), _fmt(p.track || ''), _fmt(p.product || p.prodName || p.item || ''), _fmt(p.note || p.notes || '')]);
+      rows.push([state.day, "PRE-PACKING", _prepackOrderId(p), _upperUser(p.user || p.operator), _fmt(p.track || ''), _fmt(p.product || p.prodName || p.item || ''), '', '', '', _fmt(p.note || p.notes || '')]);
     });
 
     _downloadCSV("performance_"+state.day+"_"+operator+".csv", rows);
