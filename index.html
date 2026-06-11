@@ -2957,6 +2957,45 @@ function _parseIds(raw) {
         var batchData = await _loadAllBatchesForSearch();
         window.__lastBatchDataForSearch = batchData;
 
+        function _batchContainsSearchId(batchObj, orderId){
+            if(!batchObj || !orderId) return false;
+            var ex = batchObj.expected_ids || [];
+            if(!Array.isArray(ex)) ex = Object.values(ex || {});
+            return ex.map(function(x){ return String(x || '').trim(); }).indexOf(String(orderId || '').trim()) !== -1;
+        }
+
+        function _findExistingBatchForSearch(batchKeyOrName, orderId){
+            var ref = String(batchKeyOrName || '').trim();
+            if(ref && batchData[ref] && _batchContainsSearchId(batchData[ref], orderId)) {
+                return { key: ref, data: batchData[ref] };
+            }
+            var refUpper = ref.toUpperCase();
+            var found = null;
+            Object.entries(batchData || {}).some(function(pair){
+                var k = pair[0];
+                var b = pair[1] || {};
+                var nameUpper = String(b.name || '').trim().toUpperCase();
+                if((String(k || '').trim().toUpperCase() === refUpper || (refUpper && nameUpper === refUpper)) && _batchContainsSearchId(b, orderId)){
+                    found = { key: k, data: b };
+                    return true;
+                }
+                return false;
+            });
+            return found;
+        }
+
+        function _isOfficeBatchCreatedType(typeVal){
+            return String(typeVal || '').toUpperCase().trim() === 'OFFICE / BATCH_CREATED';
+        }
+
+        function _isOfficeBatchReferenceType(typeVal){
+            return String(typeVal || '').toUpperCase().trim() === 'OFFICE / BATCH_REFERENCE';
+        }
+
+        function _isOfficeBatchInfoType(typeVal){
+            var t = String(typeVal || '').toUpperCase().trim();
+            return t === 'OFFICE / BATCH_CREATED' || t === 'OFFICE / BATCH_REFERENCE';
+        }
 
         function _eventKey(ev){
             return [
@@ -3088,6 +3127,7 @@ function _parseIds(raw) {
                     dateClean: _fmt(e.dateClean),
                     DateTime: _fmt(e.DateTime),
                     Type: _fmt(e.Type),
+                    BatchKey: _fmt(e.BatchKey || e.batchKey || e.Batch_Key || ''),
                     Batch: _fmt(e.Batch || e.batchName || e.BatchName || e.Batch_Key || e.BatchKey),
                     Carrier: _fmt(e.Carrier),
                     User: _fmt(e.User),
@@ -3101,6 +3141,17 @@ function _parseIds(raw) {
                 };
                 if(!ev.DateTime) ev.DateTime = _dt(ev.dateClean, _fmt(e.time));
                 if(!ev.dateClean) ev.dateClean = ev.DateTime.slice(0,10);
+
+                // Safety: do not show stale/phantom batch creation events from id_history.
+                // If the batch no longer exists in active_batches/deleted_batches and the ID is not
+                // present inside that batch, it should not appear as OFFICE / BATCH_CREATED.
+                if(_isOfficeBatchInfoType(ev.Type)){
+                    var linkedBatch = _findExistingBatchForSearch(ev.BatchKey || ev.Batch, sid);
+                    if(!linkedBatch) return;
+                    ev.BatchKey = linkedBatch.key;
+                    ev.Batch = _fmt((linkedBatch.data && linkedBatch.data.name) ? linkedBatch.data.name : (ev.Batch || linkedBatch.key));
+                    ev.Carrier = _fmt((linkedBatch.data && linkedBatch.data.carrier) ? linkedBatch.data.carrier : ev.Carrier);
+                }
 
                 // Apply filters (type/date) here
                 if (!_passesDate(ev.DateTime, start, end)) return;
@@ -3289,7 +3340,7 @@ Object.entries(batchData).forEach(function(pair){
                 }
 
                 // pick latest batch-created info for customer/content (in case ID was re-added to new batch)
-                var latestCreated = _findLast(events, function(ev){ return _fmt(ev.Type) === "OFFICE / BATCH_CREATED"; });
+                var latestCreated = _findLast(events, function(ev){ return _isOfficeBatchCreatedType(_fmt(ev.Type)); });
                 if(latestCreated){
                     summary.batchName = _fmt(latestCreated.Batch);
                     summary.carrier = _fmt(latestCreated.Carrier);
@@ -3304,7 +3355,7 @@ Object.entries(batchData).forEach(function(pair){
                 var latestType = _fmt(latest.Type);
                 if(latestType === "CANCELLED") summary.status = "CANCELLED";
                 else if(_findLast(events, function(ev){ return _fmt(ev.Type) === "PACKING"; })) summary.status = "PACKED";
-                else if(_findLast(events, function(ev){ return _fmt(ev.Type).indexOf("OFFICE") === 0; })) summary.status = "PENDING";
+                else if(_findLast(events, function(ev){ return _isOfficeBatchInfoType(_fmt(ev.Type)); })) summary.status = "PENDING";
                 else summary.status = "FOUND";
 
                 // cancellation info (latest cancel event - highlight in UI, but do not hide later re-creations)
@@ -3333,7 +3384,7 @@ Object.entries(batchData).forEach(function(pair){
                 }
 
                 // volumes defined in batch (even if not yet packed)
-                var createdEvWithVols = _findLast(events, function(ev){ return _fmt(ev.Type) === "OFFICE / BATCH_CREATED" && ev.Volumes > 1; });
+                var createdEvWithVols = _findLast(events, function(ev){ return _isOfficeBatchInfoType(_fmt(ev.Type)) && ev.Volumes > 1; });
                 if(createdEvWithVols && !summary.volumes) {
                     summary.volumes = Number(createdEvWithVols.Volumes);
                 }
